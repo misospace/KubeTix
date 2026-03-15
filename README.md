@@ -117,11 +117,12 @@ Visit http://localhost:3000 to access the dashboard.
 ## 🛣️ Roadmap
 
 - [x] Web UI dashboard (in `kubetix-web/`)
+- [x] Backend API (in `kubetix-api/`)
+- [x] Team features (multiple users, SSO)
 - [ ] Cloud provider integrations (EKS/GKE/AKS)
 - [ ] Slack/Teams bot integration
-- [ ] Team features (multiple users, SSO)
 - [x] Docker container support
-- [ ] API endpoints for automation
+- [x] API endpoints for automation
 
 ## 🤝 Contributing
 
