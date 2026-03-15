@@ -13,12 +13,12 @@ To learn more about the release, try:
 {{- end }}
 {{- end }}
 
-{{- if .Values.database.postgresql.enabled }}
-Database is deployed with Bitnami PostgreSQL chart.
-To access the database:
+{{- if .Values.database.external.enabled }}
+Database connection configured. To test connectivity:
 
-  $ kubectl port-forward svc/{{ .Release.Name }}-postgresql 5432:5432
-  $ psql -U {{ .Values.database.postgresql.auth.username }} -d {{ .Values.database.postgresql.auth.database }}
+  $ kubectl run db-test --rm -it --image=postgres:15-alpine --restart=Never \
+    --namespace {{ .Release.Namespace }} \
+    -- psql -h {{ .Values.database.external.host }} -U {{ .Values.database.external.username }} -d {{ .Values.database.external.database }}
 {{- end }}
 
 {{- if .Values.oidc.enabled }}

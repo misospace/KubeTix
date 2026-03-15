@@ -74,9 +74,9 @@ affinity: {}
 
 # Database configuration
 database:
-  # Use external database or Bitnami PostgreSQL
+  # Use external database (required - no bundled database)
   external:
-    enabled: false
+    enabled: true
     host: ""
     port: 5432
     database: kubetix
@@ -84,24 +84,6 @@ database:
     password: ""
     existingSecret: ""
     existingSecretPasswordKey: ""
-  
-  # Bitnami PostgreSQL
-  postgresql:
-    enabled: true
-    auth:
-      username: kubetix
-      password: kubetix
-      database: kubetix
-    persistence:
-      enabled: true
-      size: 10Gi
-    resources:
-      requests:
-        memory: 256Mi
-        cpu: 100m
-      limits:
-        memory: 512Mi
-        cpu: 500m
 
 # OIDC/Authentik configuration
 oidc:

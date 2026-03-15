@@ -16,17 +16,19 @@ Helm chart for deploying KubeTix - Temporary Kubernetes Access Manager.
 helm repo add kubetix https://joryirving.github.io/kubetix-helm
 helm repo update
 
-# Install with defaults
+# Install with external database (required)
 helm install kubetix kubetix/kubetix \
   --namespace kubetix \
-  --create-namespace
+  --create-namespace \
+  --set database.external.enabled=true \
+  --set database.external.host=<your-db-host> \
+  --set database.external.password=<secure-password>
 
 # Install with custom values
 helm install kubetix kubetix/kubetix \
   --namespace kubetix \
   --create-namespace \
-  --set ingress.hosts[0].host=kubetix.example.com \
-  --set database.postgresql.auth.password=<secure-password>
+  --set ingress.hosts[0].host=kubetix.example.com
 ```
 
 ## Uninstall
@@ -54,9 +56,7 @@ The following table lists the configurable parameters of the KubeTix chart and t
 | `autoscaling.enabled` | Enable HPA | `false` |
 | `autoscaling.minReplicas` | Minimum replicas | `1` |
 | `autoscaling.maxReplicas` | Maximum replicas | `5` |
-| `database.external.enabled` | Use external DB | `false` |
-| `database.postgresql.enabled` | Use Bitnami PostgreSQL | `true` |
-| `database.postgresql.persistence.size` | DB storage size | `10Gi` |
+| `database.external.enabled` | Use external DB | `true` (required) |
 | `oidc.enabled` | Enable OIDC | `false` |
 | `oidc.issuer` | OIDC issuer URL | `""` |
 | `oidc.clientId` | OIDC client ID | `""` |
@@ -64,10 +64,14 @@ The following table lists the configurable parameters of the KubeTix chart and t
 
 ### Database Configuration
 
+**External database is required.** KubeTix does not bundle a database.
+
 #### External Database
 
 ```bash
 helm install kubetix kubetix/kubetix \
+  --namespace kubetix \
+  --create-namespace \
   --set database.external.enabled=true \
   --set database.external.host=external-db.example.com \
   --set database.external.username=kubetix \
@@ -75,12 +79,20 @@ helm install kubetix kubetix/kubetix \
   --set database.external.database=kubetix
 ```
 
-#### Bitnami PostgreSQL (Default)
+#### Using Existing Secret
 
 ```bash
+# Create secret with database credentials
+kubectl create secret generic kubetix-db \
+  --namespace kubetix \
+  --from-literal=database-url=postgresql://user:pass@host:5432/kubetix
+
+# Install with existing secret
 helm install kubetix kubetix/kubetix \
-  --set database.postgresql.auth.password=<secure-password> \
-  --set database.postgresql.persistence.size=20Gi
+  --namespace kubetix \
+  --set database.external.enabled=true \
+  --set database.external.existingSecret=kubetix-db \
+  --set database.external.existingSecretPasswordKey=database-url
 ```
 
 ### OIDC Configuration
@@ -125,7 +137,9 @@ kubectl logs -l app.kubernetes.io/name=kubetix --namespace kubetix
 kubectl get events --namespace kubetix --sort-by='.lastTimestamp'
 
 # Debug database
-kubectl port-forward svc/{{ .Release.Name }}-postgresql 5432:5432 --namespace kubetix
+kubectl run db-test --rm -it --image=postgres:15-alpine --restart=Never \
+  --namespace kubetix \
+  -- psql -h <your-db-host> -U kubetix -d kubetix
 ```
 
 ## License
