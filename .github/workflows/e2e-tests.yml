@@ -1,0 +1,86 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio httpx
+    
+    - name: Install Kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+    
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: v3.13.0
+    
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Create Kind cluster
+      run: |
+        kind create cluster --name kubetix-e2e
+    
+    - name: Wait for nodes to be ready
+      run: |
+        kubectl wait --for=condition=Ready nodes --all --timeout=120s
+    
+    - name: Install KubeTix Helm chart
+      run: |
+        helm install kubetix-test ./charts/kubetix \
+          --namespace kubetix \
+          --create-namespace \
+          --wait \
+          --timeout 5m
+    
+    - name: Wait for API to be ready
+      run: |
+        for i in {1..24}; do
+          if kubectl get pods -n kubetix -l app.kubernetes.io/name=kubetix-api -o jsonpath='{.items[0].status.phase}' | grep -q Running; then
+            echo "API pod is running"
+            break
+          fi
+          sleep 5
+        done
+    
+    - name: Port forward API
+      run: |
+        kubectl port-forward -n kubetix svc/kubetix-api 8000:8000 &
+        PORTFORWARD_PID=$!
+        echo "PORTFORWARD_PID=$PORTFORWARD_PID" >> $GITHUB_ENV
+        sleep 10
+    
+    - name: Run E2E tests
+      run: |
+        pytest tests/e2e/ -v --tb=short
+    
+    - name: Cleanup Kind cluster
+      if: always()
+      run: |
+        kind delete cluster --name kubetix-e2e
+        if [ -n "$PORTFORWARD_PID" ]; then
+          kill $PORTFORWARD_PID 2>/dev/null || true
+        fi
