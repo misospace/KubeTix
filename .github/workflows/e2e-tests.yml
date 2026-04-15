@@ -31,7 +31,7 @@ jobs:
         sudo mv ./kind /usr/local/bin/kind
     
     - name: Install Helm
-      uses: azure/setup-helm@v3
+      uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
       with:
         version: v3.13.0
     
