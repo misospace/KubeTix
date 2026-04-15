@@ -1,4 +1,4 @@
-fastapi==0.109.0
+fastapi==0.135.3
 uvicorn[standard]==0.27.0
 sqlalchemy==2.0.49
 python-jose[cryptography]==3.3.0
