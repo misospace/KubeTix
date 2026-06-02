@@ -151,3 +151,43 @@ The test suite covers: encryption, database operations, grant lifecycle, expiry 
 - Add tests for new features (unit + integration where applicable)
 - Run `./run_tests.sh` before submitting PRs
 - The AI reviewer will run automatically on PRs to `main`
+
+### Release Process
+
+KubeTix does not currently have an automated release workflow. Releases are manual.
+
+#### Steps
+
+1. **Ensure main is ready**
+   - All intended changes are merged to `main`
+   - CI passes on `main`
+
+2. **Create a tag**
+   ```bash
+   git checkout main
+   git pull --ff-only --tags origin main
+   git tag <version>
+   git push origin <version>
+   ```
+
+3. **Create a GitHub release**
+   ```bash
+   gh release create <version> \
+     --repo misospace/KubeTix \
+     --title "<version>" \
+     --generate-notes
+   ```
+
+   If a Docker image should be published, run the `Build` workflow manually from **Actions → Build → Run workflow**, targeting the release tag.
+
+#### Version convention
+
+- Tags use plain semver (e.g. `0.1.0`, no `v` prefix)
+- Version source of truth is `kc-share.py` / the project version constant
+
+#### Validation gates
+
+Before pushing a release tag:
+- `python3 -m pytest` passes
+- `python3 test_integration.py` passes
+- CI passes on `main`
