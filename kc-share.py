@@ -282,9 +282,13 @@ def main():
 
     # Download command
     download_parser = subparsers.add_parser(
-        "download", help="Download temporary context"
+        "download",
+        help="Download temporary kubeconfig to a secure file (not stdout)",
     )
     download_parser.add_argument("grant_id", help="Grant ID")
+    download_parser.add_argument(
+        "--output", "-o", default=None, help="Output file path (default: temp file)"
+    )
 
     args = parser.parse_args()
 
@@ -320,8 +324,22 @@ def main():
 
     elif args.command == "download":
         context = download_context(args.grant_id)
-        print("📄 Temporary kubeconfig:")
-        print(context)
+
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(context)
+        else:
+            # Write to a secure temp file with restricted permissions
+            import tempfile
+            fd, tmp_path = tempfile.mkstemp(suffix="-kubeconfig", prefix=".kc-share-")
+            os.close(fd)
+            output_path = Path(tmp_path)
+            output_path.write_text(context)
+            output_path.chmod(0o600)
+
+        print(f"✅ Kubeconfig written securely to: {output_path}")
+        print(f"   Use: KUBECONFIG={output_path} kubectl get nodes")
 
     else:
         parser.print_help()
