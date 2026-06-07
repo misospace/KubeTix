@@ -93,14 +93,15 @@ KUBETIX_SECRET_KEY=your-secret-key-change-in-production
 KUBECONFIG=/path/to/kubeconfig
 ```
 
-## Default Admin User
+## Bootstrap Admin User
 
-When the API starts for the first time, it creates a default admin user:
+Set `INITIAL_ADMIN_PASSWORD` to create an initial admin account on first startup:
 
 - **Email**: `admin@kubetix.local`
-- **Password**: `admin123`
+- **Password**: (set via `INITIAL_ADMIN_PASSWORD` env var)
 
-**Change this immediately in production!**
+When set, the API creates a default admin user with the provided password.
+Omit or leave empty to skip admin creation (fail closed).
 
 ## Security
 
