@@ -379,8 +379,6 @@ class TestDownloadGrants:
     
     def test_download_grant_success(self, client, db_session, auth_headers, auth_token, monkeypatch):
         """Test successfully downloading a grant."""
-        import base64
-        
         # Create kubeconfig file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
             f.write("apiVersion: v1\nkind: Config\nclusters: []\n")
@@ -391,7 +389,7 @@ class TestDownloadGrants:
         # Create grant
         user = db_session.query(User).filter(User.email == "test@example.com").first()
         kubeconfig_content = open(kubeconfig_path).read()
-        encrypted = base64.b64encode(kubeconfig_content.encode()).decode()
+        encrypted = _fernet_encrypt(kubeconfig_content)
         
         grant = Grant(
             id=secrets.token_urlsafe(16),
