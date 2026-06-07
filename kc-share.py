@@ -332,6 +332,7 @@ def main():
         else:
             # Write to a secure temp file with restricted permissions
             import tempfile
+
             fd, tmp_path = tempfile.mkstemp(suffix="-kubeconfig", prefix=".kc-share-")
             os.close(fd)
             output_path = Path(tmp_path)
