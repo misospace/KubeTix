@@ -92,7 +92,7 @@ jobs:
           --set env[0].name=KUBECONFIG \
           --set env[0].value=/app/kubeconfig/config \
           --set env[1].name=KUBECONFIG_ENCRYPTION_KEY \
-          --set env[1].value=e2e-test-encryption-key-do-not-use-in-prod \
+          --set env[1].value=dJWHka3L7pzAe0o2p_ss3FkybzxfEENl8bU-vpdgXvc= \
           --set extraVolumes[0].name=kubeconfig \
           --set extraVolumes[0].secret.secretName=kubetix-kubeconfig \
           --set extraVolumeMounts[0].name=kubeconfig \
