@@ -29,6 +29,9 @@ try:
     from slowapi.errors import RateLimitExceeded
     
     HAS_RATE_LIMITING = True
+    # Disable rate limiting in test mode to avoid 429 errors
+    if os.environ.get("TESTING"):
+        HAS_RATE_LIMITING = False
 except ImportError:
     HAS_RATE_LIMITING = False
 
