@@ -5,8 +5,17 @@ Tests the /grants/{grant_id}/download endpoint
 
 import pytest
 import json
-import base64
+# Fernet encryption for test fixtures (matches API encryption)
+from cryptography.fernet import Fernet
 from datetime import datetime, timezone, timedelta
+
+# Fixed Fernet key for consistent test data (matches API default behavior)
+_TEST_FERNET_KEY = b"NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
+_test_fernet = Fernet(_TEST_FERNET_KEY)
+
+def _fernet_encrypt(data):
+    """Encrypt data for test fixtures using the same Fernet scheme as the API."""
+    return _test_fernet.encrypt(data.encode()).decode()
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -137,7 +146,7 @@ class TestDownloadGrant:
         
         # Create grant
         user = db_session.query(User).filter(User.email == "test@example.com").first()
-        encrypted = base64.b64encode(kubeconfig_content.encode()).decode()
+        encrypted = _fernet_encrypt(kubeconfig_content)
         
         grant = Grant(
             id=secrets.token_urlsafe(16),
