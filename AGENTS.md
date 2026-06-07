@@ -193,3 +193,5 @@ Before pushing a release tag:
 - `python3 -m pytest` passes
 - `python3 test_integration.py` passes
 - CI passes on `main`
+
+# Note: AI PR Review action version pinned to v1.0.18 for stability.
