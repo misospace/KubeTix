@@ -623,9 +623,11 @@ async def download_grant(
     # Decrypt kubeconfig
     _key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
     if not _key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Encryption key not configured. Set KUBECONFIG_ENCRYPTION_KEY."
+        _key = Fernet.generate_key().decode()
+        import logging
+        logging.warning(
+            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
+            "existing grants will fail to decrypt after restart."
         )
     fernet = Fernet(_key.encode())
     kubeconfig = fernet.decrypt(grant.encrypted_kubeconfig.encode()).decode()
