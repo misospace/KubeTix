@@ -76,7 +76,9 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-API runs on `http://localhost:8000`. Default admin user: `admin@kubetix.local` / `admin123`.
+API runs on `http://localhost:8000`.
+
+**First-time admin setup:** Set `INITIAL_ADMIN_PASSWORD` as an environment variable before starting the API. The API creates one admin account (`admin@kubetix.local`) with that password on first startup, then never exposes or logs it. Never bake credentials into code or documentation.
 
 ### Web UI
 
