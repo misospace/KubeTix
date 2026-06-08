@@ -5,7 +5,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/joryirving/kubetix-api
+  repository: ghcr.io/misospace/kubetix-api
   pullPolicy: Always
   tag: ""
 
@@ -72,9 +72,17 @@ tolerations: []
 
 affinity: {}
 
+# Application secret key for JWT signing.
+# NOTE: Default is for development/testing only. MUST be overridden in production
+# with a unique, securely-generated key via --set or values override.
+# Generate one with: openssl rand -base64 32
+secretKey: "dev-secret-key-do-not-use-in-production-change-me-2026060801"
+
 # Database configuration
 database:
   # SQLite (default - simple, no external dependencies)
+  # WARNING: SQLite is NOT suitable for multi-replica HA deployments.
+  # Only use with replicaCount: 1 and local/persistent storage.
   sqlite:
     enabled: true
     persistence:
@@ -82,6 +90,7 @@ database:
       size: 1Gi
   
   # PostgreSQL (production recommended)
+  # Requires external PostgreSQL server or Helm chart dependency.
   postgresql:
     enabled: false
     host: ""
