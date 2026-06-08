@@ -5,7 +5,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/joryirving/kubetix-api
+  repository: ghcr.io/misospace/kubetix-api
   pullPolicy: Always
   tag: ""
 
@@ -72,9 +72,16 @@ tolerations: []
 
 affinity: {}
 
+# Application secret key for JWT signing.
+# MUST be set in production to prevent JWT invalidation on Helm upgrades.
+# Generate one with: openssl rand -base64 32
+secretKey: ""
+
 # Database configuration
 database:
   # SQLite (default - simple, no external dependencies)
+  # WARNING: SQLite is NOT suitable for multi-replica HA deployments.
+  # Only use with replicaCount: 1 and local/persistent storage.
   sqlite:
     enabled: true
     persistence:
@@ -82,6 +89,7 @@ database:
       size: 1Gi
   
   # PostgreSQL (production recommended)
+  # Requires external PostgreSQL server or Helm chart dependency.
   postgresql:
     enabled: false
     host: ""
