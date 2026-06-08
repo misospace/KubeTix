@@ -86,8 +86,13 @@ jobs:
 
     - name: Install Kind (with checksum verification)
       run: |
-        curl -Lo ./kind-linux-amd64 https://github.com/kubernetes-sigs/kind/releases/download/v0.20.0/kind-linux-amd64
-        echo '513a7213d6d3332dd9ef27c24dab35e5ef10a04fa27274fe1c14d8a246493ded  ./kind-linux-amd64' | sha256sum -c -
+        curl -fSL --retry 3 --retry-max-time 30 -Lo ./kind-linux-amd64 https://github.com/kubernetes-sigs/kind/releases/download/v0.20.0/kind-linux-amd64
+        ACTUAL=$(sha256sum ./kind-linux-amd64 | awk '{print $1}')
+        EXPECTED='513a7213d6d3332dd9ef27c24dab35e5ef10a04fa27274fe1c14d8a246493ded'
+        if [ "$ACTUAL" != "$EXPECTED" ]; then
+          echo "ERROR: Checksum mismatch. Got $ACTUAL, expected $EXPECTED"
+          exit 1
+        fi
         chmod +x ./kind-linux-amd64
         sudo mv ./kind-linux-amd64 /usr/local/bin/kind
 
