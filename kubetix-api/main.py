@@ -153,6 +153,70 @@ def _provision_user(db: Session, email: str, full_name: Optional[str],
 
 
 # ---------------------------------------------------------------------------
+# PKCE helpers (audit finding: CSRF / callback leakage — #60)
+# ---------------------------------------------------------------------------
+
+def _generate_pkce_params() -> tuple[str, str]:
+    """Generate a PKCE code_verifier and its S256 code_challenge.
+
+    Per RFC 7636: verifier = 43-128 chars [A-Za-z0-9~-],
+    challenge   = base64url(sha256(verifier)).rstrip('=').
+    """
+    import hashlib
+    import base64
+
+    code_verifier = secrets.token_urlsafe(64)  # 86 chars, well within limits
+    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode()
+    return code_verifier, code_challenge
+
+
+def _create_auth_code_record(db: Session, code_challenge: str, state: str,
+                              provider: str) -> str:
+    """Persist PKCE challenge + CSRF state; returns the auth_code id."""
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    record = AuthCode(
+        id=secrets.token_urlsafe(16),
+        code_challenge=code_challenge,
+        state=state,
+        provider=provider,
+        expires_at=expires_at,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record.id
+
+
+def _verify_auth_code(db: Session, auth_code_id: str,
+                      received_state: str, code_verifier: str) -> bool:
+    """Verify state match + PKCE challenge, mark used, return True on success."""
+    import hashlib
+    import base64 as b64mod
+
+    now = datetime.now(timezone.utc)
+    record = db.query(AuthCode).filter(
+        AuthCode.id == auth_code_id,
+        AuthCode.used == False,
+        AuthCode.state == received_state,
+        AuthCode.expires_at > now,
+    ).first()
+    if record is None:
+        return False
+
+    # Verify PKCE: compute challenge from the verifier and compare
+    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed_challenge = b64mod.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode()
+    if computed_challenge != record.code_challenge:
+        return False
+
+    # Mark as used (best-effort atomicity)
+    record.used = True
+    db.commit()
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Database Models
 # ---------------------------------------------------------------------------
 
@@ -194,6 +258,22 @@ class TeamMember(Base):
         # Unique constraint: one role per user per team
         UniqueConstraint('team_id', 'user_id', name='uq_team_user'),
     )
+
+
+class AuthCode(Base):
+    """Store PKCE code_challenge + CSRF state for OAuth/OIDC flows.
+
+    Records expire after 10 minutes and are marked used on successful callback.
+    """
+    __tablename__ = "auth_codes"
+
+    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
+    code_challenge = Column(String(128), nullable=False)  # PKCE S256 challenge
+    state = Column(String(128), nullable=False)            # CSRF state token
+    provider = Column(String(50), nullable=False)          # e.g. 'google', 'oidc'
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Grant(Base):
@@ -873,6 +953,7 @@ async def list_team_members(
 
 # ---------------------------------------------------------------------------
 # SSO/Authentik/OIDC Endpoints — REAL implementations (P0-2 fix)
+# Hardened against CSRF and callback leakage (audit #60)
 # ---------------------------------------------------------------------------
 
 @app.post("/auth/sso/callback")
@@ -890,6 +971,9 @@ async def sso_callback(
     Real implementation: exchanges the authorization code for tokens at the
     provider's token endpoint, fetches user info, provisions/updates the user
     in the local database, and returns a JWT access token.
+
+    Security (audit #60): verifies CSRF state and PKCE code_verifier before
+    exchanging the code, and sanitises error messages to prevent information leakage.
     """
     # Map provider names to their configuration
     provider_configs = {
@@ -941,6 +1025,20 @@ async def sso_callback(
             detail=f"SSO provider '{provider}' is not configured. Set {cfg['client_id_env']} and {cfg['client_secret_env']}."
         )
 
+    # --- CSRF state + PKCE verification (audit #60) ---
+    auth_code_id = request.query_params.get("state", "")
+    code_verifier = request.query_params.get("code_verifier", "")
+    if not auth_code_id or not code_verifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required parameters: state and code_verifier"
+        )
+    if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired authorization state"
+        )
+
     import httpx
 
     # Step 1: Exchange code for access token
@@ -972,9 +1070,10 @@ async def sso_callback(
         )
 
     if resp.status_code != 200:
+        # Sanitised error: do not leak raw provider response body
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Failed to exchange code for token: {resp.text}"
+            detail="Failed to exchange authorization code for token"
         )
 
     token_data = resp.json()
@@ -993,9 +1092,10 @@ async def sso_callback(
 
     userinfo_resp = httpx.get(cfg["userinfo_url"], headers=headers, timeout=10)
     if userinfo_resp.status_code != 200:
+        # Sanitised error: do not leak raw provider response body
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Failed to fetch user info: {userinfo_resp.text}"
+            detail="Failed to fetch user information from provider"
         )
 
     userinfo = userinfo_resp.json()
@@ -1048,6 +1148,10 @@ async def sso_login(provider: str):
     """
     Initiate SSO login flow.
     Returns the OAuth authorization URL to redirect the user to.
+
+    Security (audit #60): includes PKCE code_challenge and a CSRF state token
+    in the auth URL.  The client must send both ``state`` (= auth_code_id) and
+    ``code_verifier`` back to the callback endpoint.
     """
     # Redirect URI for all SSO providers (provider-specific callback path)
     redirect_uri = os.environ.get(
@@ -1095,11 +1199,25 @@ async def sso_login(provider: str):
 
     import urllib.parse
 
-    params = {
+    # --- PKCE + CSRF state (audit #60) ---
+    code_verifier, code_challenge = _generate_pkce_params()
+    csrf_state = secrets.token_urlsafe(32)  # opaque CSRF token
+
+    # Store challenge + state in DB for later verification on callback
+    db = SessionLocal()
+    try:
+        auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, provider)
+    finally:
+        db.close()
+
+    params: dict = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": cfg["scope"],
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": auth_code_id,  # serves as both CSRF state and DB lookup key
     }
 
     auth_url = f"{cfg['auth_url']}?{urllib.parse.urlencode(params)}"
@@ -1107,7 +1225,8 @@ async def sso_login(provider: str):
     return {
         "provider": provider,
         "auth_url": auth_url,
-        "message": "Redirect user to auth_url",
+        "code_verifier": code_verifier,  # client must send this back to callback
+        "message": "Redirect user to auth_url; store code_verifier for the callback",
     }
 
 
@@ -1125,6 +1244,9 @@ async def oidc_callback(
     Real implementation: exchanges the authorization code for tokens at the
     issuer's token endpoint, fetches user info, provisions/updates the user,
     and returns a JWT access token.
+
+    Security (audit #60): verifies CSRF state and PKCE code_verifier before
+    exchanging the code, and sanitises error messages.
     """
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
@@ -1137,6 +1259,20 @@ async def oidc_callback(
             detail="OIDC not configured. Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET"
         )
 
+    # --- CSRF state + PKCE verification (audit #60) ---
+    auth_code_id = request.query_params.get("state", "")
+    code_verifier = request.query_params.get("code_verifier", "")
+    if not auth_code_id or not code_verifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required parameters: state and code_verifier"
+        )
+    if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired authorization state"
+        )
+
     # Step 1: Exchange code for tokens at the issuer's token endpoint
     try:
         token_data = _exchange_code_for_tokens(
@@ -1146,10 +1282,11 @@ async def oidc_callback(
             code=code,
             redirect_uri=oidc_redirect_uri,
         )
-    except Exception as exc:
+    except Exception:
+        # Sanitised error: do not leak raw exception / provider details
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Failed to exchange code for token: {exc}"
+            detail="Failed to exchange authorization code for token"
         )
 
     access_token = token_data.get("access_token")
@@ -1162,10 +1299,11 @@ async def oidc_callback(
     # Step 2: Fetch user info
     try:
         userinfo = _get_userinfo(issuer=oidc_issuer, access_token=access_token)
-    except Exception as exc:
+    except Exception:
+        # Sanitised error: do not leak raw exception / provider details
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Failed to fetch user info from OIDC provider: {exc}"
+            detail="Failed to fetch user information from OIDC provider"
         )
 
     # Step 3: Extract email (standard OIDC claim)
@@ -1203,6 +1341,10 @@ async def oidc_login():
     """
     Initiate OIDC login with configured provider.
     Redirects to the OIDC provider's authorization endpoint.
+
+    Security (audit #60): includes PKCE code_challenge and a CSRF state token
+    in the auth URL.  The client must send both ``state`` (= auth_code_id) and
+    ``code_verifier`` back to the callback endpoint.
     """
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
@@ -1219,18 +1361,33 @@ async def oidc_login():
 
     import urllib.parse
 
-    params = {
+    # --- PKCE + CSRF state (audit #60) ---
+    code_verifier, code_challenge = _generate_pkce_params()
+    csrf_state = secrets.token_urlsafe(32)
+
+    # Store challenge + state in DB for later verification on callback
+    db = SessionLocal()
+    try:
+        auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
+    finally:
+        db.close()
+
+    params: dict = {
         "client_id": oidc_client_id,
         "redirect_uri": oidc_redirect_uri,
         "response_type": "code",
         "scope": "openid profile email",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": auth_code_id,  # serves as both CSRF state and DB lookup key
     }
 
     auth_url = f"{oidc_issuer.rstrip('/')}/authorize?{urllib.parse.urlencode(params)}"
 
     return {
         "auth_url": auth_url,
-        "message": "Redirect user to auth_url",
+        "code_verifier": code_verifier,
+        "message": "Redirect user to auth_url; store code_verifier for the callback",
     }
 
 
