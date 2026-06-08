@@ -416,7 +416,20 @@ def get_current_user(
 @app.on_event("startup")
 async def startup_event():
     init_db()
-    # Create admin user if not exists
+    # Secure admin bootstrap: require explicit INITIAL_ADMIN_PASSWORD env var.
+    # No default credentials — fail closed in production.
+    # Local-only bootstrap via env var; never bake passwords into code or docs.
+    _admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+    if not _admin_password:
+        import logging
+        logging.warning(
+            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
+            "The API will run without a default admin account. "
+            "Create the first admin via /users registration or by setting "
+            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
+        )
+        return
+
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
@@ -424,7 +437,7 @@ async def startup_event():
             admin = User(
                 id=secrets.token_urlsafe(16),
                 email="admin@kubetix.local",
-                hashed_password=get_password_hash("admin123"),
+                hashed_password=get_password_hash(_admin_password),
                 full_name="Admin User",
                 is_admin=True
             )
