@@ -131,7 +131,7 @@ users:
         self.assertIn("revoked", result.stdout)
     
     def test_cli_download_command(self):
-        """Test CLI download command"""
+        """Test CLI download writes kubeconfig to secure file, not stdout"""
         # Create a grant first
         create_result = subprocess.run(
             [sys.executable, "kc-share.py", "create", "--cluster", "test", "--role", "view", "--expiry", "1"],
@@ -152,9 +152,63 @@ users:
         )
         
         self.assertEqual(result.returncode, 0)
-        self.assertIn("apiVersion", result.stdout)
-        self.assertIn("kind: Config", result.stdout)
+        self.assertNotIn("apiVersion", result.stdout)
+        self.assertNotIn("kind: Config", result.stdout)
+        self.assertIn("written securely to", result.stdout)
+        self.assertIn("KUBECONFIG=", result.stdout)
+        output_path = result.stdout.split("to: ")[1].strip().split("\n")[0]
+        self.assertTrue(Path(output_path).exists())
+        self.assertEqual(Path(output_path).stat().st_mode & 0o777, 0o600)
+        file_content = Path(output_path).read_text()
+        self.assertIn("apiVersion", file_content)
+        self.assertIn("kind: Config", file_content)
+        self.assertNotIn("apiVersion", result.stdout)
+        self.assertNotIn("kind: Config", result.stdout)
+        self.assertIn("written securely to", result.stdout)
+        self.assertIn("KUBECONFIG=", result.stdout)
+        output_path = result.stdout.split("to: ")[1].strip().split("\n")[0]
+        self.assertTrue(Path(output_path).exists())
+        self.assertEqual(Path(output_path).stat().st_mode & 0o777, 0o600)
+        file_content = Path(output_path).read_text()
+        self.assertIn("apiVersion", file_content)
+        self.assertIn("kind: Config", file_content)
     
+
+    def test_cli_download_with_output_flag(self):
+        """Test CLI download command with custom --output path"""
+        import tempfile
+
+        # Create a grant first
+        create_result = subprocess.run(
+            [sys.executable, "kc-share.py", "create", "--cluster", "test", "--role", "view", "--expiry", "1"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent
+        )
+
+        grant_id = create_result.stdout.split("ID: ")[1].strip().split("\n")[0]
+
+        # Download to a custom output path
+        with tempfile.NamedTemporaryFile(suffix="-kubeconfig", delete=False) as tf:
+            output_path = tf.name
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "kc-share.py", "download", grant_id, "--output", output_path],
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parent
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(output_path, result.stdout)
+            self.assertTrue(Path(output_path).exists())
+            file_content = Path(output_path).read_text()
+            self.assertIn("apiVersion", file_content)
+            self.assertIn("kind: Config", file_content)
+        finally:
+            Path(output_path).unlink(missing_ok=True)
+
     def test_cli_help_command(self):
         """Test CLI help command"""
         result = subprocess.run(

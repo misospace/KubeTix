@@ -3,6 +3,8 @@ KubeTix Backend API
 FastAPI-based REST API for KubeTix
 """
 
+import subprocess
+import sys
 import secrets
 import sqlite3
 import os
@@ -27,8 +29,22 @@ try:
     from slowapi.errors import RateLimitExceeded
     
     HAS_RATE_LIMITING = True
+    # Disable rate limiting in test mode to avoid 429 errors
+    if os.environ.get("TESTING"):
+        HAS_RATE_LIMITING = False
 except ImportError:
     HAS_RATE_LIMITING = False
+
+# Authenticated encryption for kubeconfig storage
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "cryptography"]
+    )
+    from cryptography.fernet import Fernet
+
+_ENCRYPTION_KEY = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or None
 
 # Configuration
 SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or secrets.token_urlsafe(32)
@@ -543,9 +559,17 @@ async def create_grant(
     with open(kubeconfig_path) as f:
         kubeconfig = f.read()
 
-    # Encrypt kubeconfig (simple base64 for demo, use Fernet in production)
-    import base64
-    encrypted_kubeconfig = base64.b64encode(kubeconfig.encode()).decode()
+    # Encrypt kubeconfig with Fernet authenticated encryption.
+    _key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
+    if not _key:
+        _key = Fernet.generate_key().decode()
+        import logging
+        logging.warning(
+            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
+            "existing grants will fail to decrypt after restart."
+        )
+    fernet = Fernet(_key.encode())
+    encrypted_kubeconfig = fernet.encrypt(kubeconfig.encode()).decode()
 
     # Create grant
     expires_at = datetime.now(timezone.utc) + timedelta(hours=grant_data.expiry_hours)
@@ -613,8 +637,16 @@ async def download_grant(
         )
 
     # Decrypt kubeconfig
-    import base64
-    kubeconfig = base64.b64decode(grant.encrypted_kubeconfig).decode()
+    _key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
+    if not _key:
+        _key = Fernet.generate_key().decode()
+        import logging
+        logging.warning(
+            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
+            "existing grants will fail to decrypt after restart."
+        )
+    fernet = Fernet(_key.encode())
+    kubeconfig = fernet.decrypt(grant.encrypted_kubeconfig.encode()).decode()
 
     return {
         "id": grant.id,
