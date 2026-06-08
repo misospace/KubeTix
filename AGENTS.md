@@ -76,7 +76,9 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-API runs on `http://localhost:8000`. Default admin user: `admin@kubetix.local` / `admin123`.
+API runs on `http://localhost:8000`.
+
+**First-time admin setup:** Set `INITIAL_ADMIN_PASSWORD` as an environment variable before starting the API. The API creates one admin account (`admin@kubetix.local`) with that password on first startup, then never exposes or logs it. Never bake credentials into code or documentation.
 
 ### Web UI
 
@@ -121,8 +123,9 @@ The test suite covers: encryption, database operations, grant lifecycle, expiry 
 
 ### Encryption
 
-- Fernet (AES-128-CBC) for kubeconfig encryption in the CLI tool
-- Key management: auto-generated on first run, persisted in `~/.kc-share/config.json`, or overridden via `KC_SHARE_KEY` env var
+- Fernet (AES-128-CBC) for kubeconfig encryption in both CLI and API
+- CLI key management: auto-generated on first run, persisted in `~/.kc-share/config.json`, or overridden via `KC_SHARE_KEY` env var
+- API key management: set `KUBECONFIG_ENCRYPTION_KEY` env var; generates an ephemeral key at startup if unset (with warning — existing grants will fail to decrypt after restart)
 
 ### Authentication (API)
 
@@ -191,3 +194,5 @@ Before pushing a release tag:
 - `python3 -m pytest` passes
 - `python3 test_integration.py` passes
 - CI passes on `main`
+
+# Note: AI PR Review action version pinned to v1.0.18 for stability.
