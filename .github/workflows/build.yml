@@ -12,6 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Builds the API image. Pushes to GHCR on all events so e2e-tests can pull it.
+  # On PRs, only pushes the sha tag (not latest) to avoid polluting the release tag.
   build-and-publish:
     runs-on: ubuntu-latest
     permissions:
@@ -31,15 +33,19 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push API image (sha + latest)
+    - name: Build and push API image (sha tag always, latest only on non-PR)
+      id: build
       uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
       with:
         context: kubetix-api
-        push: ${{ github.event_name != 'pull_request' }}
+        push: true
+        load: true
         tags: |
           ghcr.io/${{ github.repository_owner }}/kubetix-api:${{ github.sha }}
-          ghcr.io/${{ github.repository_owner }}/kubetix-api:latest
+          ${{ github.event_name != 'pull_request' && format('ghcr.io/{0}/kubetix-api:latest', github.repository_owner) || '' }}
 
+  # Runs on PRs and pushes to validate frontend build reproducibility
+  # before E2E tests execute against the built image.
   frontend-build:
     runs-on: ubuntu-latest
     steps:
@@ -60,8 +66,9 @@ jobs:
       run: |
         npm run build
 
+  # Runs on PRs and pushes after build-and-publish completes.
+  # Pulls the image pushed by build-and-publish from GHCR.
   e2e-tests:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: [build-and-publish]
     permissions:
@@ -83,8 +90,13 @@ jobs:
 
     - name: Install Kind (with checksum verification)
       run: |
-        curl -Lo ./kind-linux-amd64 https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-        echo '513a7213d6d3332dd9ef27c24dab35e5ef10a04fa27274fe1c14d8a246493ded  ./kind-linux-amd64' | sha256sum -c -
+        curl -fSL --retry 3 --retry-max-time 30 -Lo ./kind-linux-amd64 https://github.com/kubernetes-sigs/kind/releases/download/v0.20.0/kind-linux-amd64
+        ACTUAL=$(sha256sum ./kind-linux-amd64 | awk '{print $1}')
+        EXPECTED='513a7213d6d3332dd9ef27c24dab35e5ef10a04fa27274fe1c14d8a246493ded'
+        if [ "$ACTUAL" != "$EXPECTED" ]; then
+          echo "ERROR: Checksum mismatch. Got $ACTUAL, expected $EXPECTED"
+          exit 1
+        fi
         chmod +x ./kind-linux-amd64
         sudo mv ./kind-linux-amd64 /usr/local/bin/kind
 
@@ -103,27 +115,36 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Create Kind cluster and deploy
-      env:
-        IMAGE_TAG: ${{ github.sha }}
+    - name: Create Kind cluster
       run: |
         kind create cluster --name kubetix-e2e
         kubectl wait --for=condition=Ready nodes --all --timeout=120s
 
-        # Create namespace first, then set up kubeconfig secret
-        kubectl create namespace kubetix
+    - name: Pull and load API image into Kind
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker pull ghcr.io/${{ github.repository_owner }}/kubetix-api:${IMAGE_TAG}
+        kind load docker-image ghcr.io/${{ github.repository_owner }}/kubetix-api:${IMAGE_TAG} --name kubetix-e2e
 
+    - name: Set up deployment namespace and secrets
+      run: |
+        kubectl create namespace kubetix || true
         # Extract kubeconfig for the API pod to use
         kind get kubeconfig --name kubetix-e2e > /tmp/e2e-kubeconfig
         kubectl create secret generic kubetix-kubeconfig \
           --from-file=config=/tmp/e2e-kubeconfig \
-          --namespace kubetix
+          --namespace kubetix --dry-run=client -o yaml | kubectl apply -f -
 
-        helm install kubetix-test ./charts/kubetix \
+    - name: Deploy with Helm
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        helm upgrade --install kubetix-test ./charts/kubetix \
           --namespace kubetix \
           --set image.repository=ghcr.io/${{ github.repository_owner }}/kubetix-api \
           --set image.tag=$IMAGE_TAG \
-          --set image.pullPolicy=Always \
+          --set image.pullPolicy=IfNotPresent \
           --set env[0].name=KUBECONFIG \
           --set env[0].value=/app/kubeconfig/config \
           --set env[1].name=KUBECONFIG_ENCRYPTION_KEY \
