@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import axios from "axios"
 import { formatDistanceToNow } from "date-fns"
 import { 
@@ -11,8 +11,17 @@ import {
   Check, 
   AlertCircle,
   Plus,
-  X
+  X,
+  LogIn,
+  Loader2,
+  LogOut,
+  EyeOff,
+  User
 } from "lucide-react"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Grant {
   id: string
@@ -24,78 +33,262 @@ interface Grant {
   revoked: boolean
 }
 
+interface UserResponse {
+  id: string
+  email: string
+  full_name: string | null
+  is_admin: boolean
+  created_at: string
+}
+
+interface AuthToken {
+  access_token: string
+  token_type: string
+  user: UserResponse
+}
+
+// ---------------------------------------------------------------------------
+// API client helpers (token stored in localStorage)
+// ---------------------------------------------------------------------------
+
+const getApiUrl = (): string => {
+  if (typeof window !== "undefined") {
+    return process.env.NEXT_PUBLIC_API_URL || ""
+  }
+  return ""
+}
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null
+  return localStorage.getItem("kubetix_token")
+}
+
+function setToken(token: string): void {
+  if (typeof window === "undefined") return
+  localStorage.setItem("kubetix_token", token)
+}
+
+function clearToken(): void {
+  if (typeof window === "undefined") return
+  localStorage.removeItem("kubetix_token")
+}
+
+function getAuthHeader(): Record<string, string> | undefined {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : undefined
+}
+
+async function apiLogin(email: string, password: string): Promise<AuthToken> {
+  const apiUrl = getApiUrl()
+  const resp = await axios.post(`${apiUrl}/login`, { email, password })
+  setToken(resp.data.access_token)
+  return resp.data
+}
+
+async function apiLogout(): Promise<void> {
+  clearToken()
+}
+
+async function fetchGrants(): Promise<Grant[]> {
+  const apiUrl = getApiUrl()
+  const resp = await axios.get(`${apiUrl}/grants`, { headers: getAuthHeader() })
+  return resp.data
+}
+
+async function createGrant(payload: {
+  cluster_name: string
+  namespace?: string | null
+  role: string
+  expiry_hours: number
+}): Promise<Grant> {
+  const apiUrl = getApiUrl()
+  const resp = await axios.post(`${apiUrl}/grants`, payload, { headers: getAuthHeader() })
+  return resp.data
+}
+
+async function revokeGrant(grantId: string): Promise<void> {
+  const apiUrl = getApiUrl()
+  await axios.delete(`${apiUrl}/grants/${grantId}`, { headers: getAuthHeader() })
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function Home() {
   const [grants, setGrants] = useState<Grant[]>([])
   const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   
-  // Form state
+  // Auth state
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [currentUser, setCurrentUser] = useState<UserResponse | null>(null)
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [loginEmail, setLoginEmail] = useState("admin@kubetix.local")
+  const [loginPassword, setLoginPassword] = useState("")
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginSubmitting, setLoginSubmitting] = useState(false)
+
+  // Form state for create grant
   const [clusterName, setClusterName] = useState("prod")
   const [namespace, setNamespace] = useState("")
   const [role, setRole] = useState("view")
   const [expiry, setExpiry] = useState(4)
 
+  // Revoke confirmation state
+  const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null)
+  const [revokeSubmitting, setRevokeSubmitting] = useState(false)
+
+  // Create grant loading state
+  const [creating, setCreating] = useState(false)
+
+  // -----------------------------------------------------------------------
+  // Lifecycle: check auth on mount and fetch grants
+  // -----------------------------------------------------------------------
+
   useEffect(() => {
-    fetchGrants()
+    checkAuthAndFetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const fetchGrants = async () => {
+  const checkAuthAndFetch = useCallback(async () => {
+    setAuthLoading(true)
+    setError(null)
+    
+    const token = getToken()
+    if (!token) {
+      setAuthLoading(false)
+      setLoading(false)
+      return
+    }
+
+    // Validate token by fetching /users/me
     try {
-      // In production, this would call your API
-      // const response = await axios.get(`${process.env.API_URL}/grants`)
-      // setGrants(response.data)
+      const apiUrl = getApiUrl()
+      const resp = await axios.get(`${apiUrl}/users/me`, { headers: getAuthHeader() })
+      setCurrentUser(resp.data)
+      setIsLoggedIn(true)
       
-      // Mock data for now
-      const mockGrants: Grant[] = [
-        {
-          id: "HVxTHVGn6413wnB5RL_L2w",
-          cluster_name: "prod",
-          namespace: "production",
-          role: "edit",
-          created_at: new Date(Date.now() - 3600000).toISOString(),
-          expires_at: new Date(Date.now() + 3 * 3600000).toISOString(),
-          revoked: false
-        }
-      ]
-      setGrants(mockGrants)
-    } catch (error) {
-      console.error("Failed to fetch grants:", error)
+      // Fetch grants after confirming auth
+      const grantsData = await fetchGrants()
+      setGrants(grantsData)
+    } catch {
+      // Token invalid — clear it
+      clearToken()
+      setIsLoggedIn(false)
+      setCurrentUser(null)
     } finally {
+      setAuthLoading(false)
       setLoading(false)
     }
+  }, [])
+
+  // -----------------------------------------------------------------------
+  // Auth handlers
+  // -----------------------------------------------------------------------
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoginError(null)
+    setLoginSubmitting(true)
+    
+    try {
+      const auth = await apiLogin(loginEmail, loginPassword)
+      setCurrentUser(auth.user)
+      setIsLoggedIn(true)
+      setShowLoginModal(false)
+      setLoginEmail("admin@kubetix.local")
+      setLoginPassword("")
+      
+      // Fetch grants after login
+      const grantsData = await fetchGrants()
+      setGrants(grantsData)
+    } catch (err: any) {
+      if (err.response?.data?.detail) {
+        setLoginError(err.response.data.detail)
+      } else {
+        setLoginError("Failed to connect to the API server.")
+      }
+    } finally {
+      setLoginSubmitting(false)
+    }
   }
+
+  const handleLogout = async () => {
+    await apiLogout()
+    setIsLoggedIn(false)
+    setCurrentUser(null)
+    setGrants([])
+  }
+
+  // -----------------------------------------------------------------------
+  // Grant handlers
+  // -----------------------------------------------------------------------
 
   const handleCreateGrant = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
+    setCreating(true)
     
     try {
-      // In production, this would call your API
-      // await axios.post(`${process.env.API_URL}/grants`, {
-      //   cluster_name: clusterName,
-      //   namespace: namespace || null,
-      //   role,
-      //   expiry_hours: expiry
-      // })
+      await createGrant({
+        cluster_name: clusterName,
+        namespace: namespace || null,
+        role,
+        expiry_hours: expiry,
+      })
       
-      // Mock success
       setShowCreateModal(false)
-      fetchGrants()
-    } catch (error) {
-      console.error("Failed to create grant:", error)
+      // Reset form
+      setClusterName("prod")
+      setNamespace("")
+      setRole("view")
+      setExpiry(4)
+      
+      // Refresh grants list
+      const grantsData = await fetchGrants()
+      setGrants(grantsData)
+    } catch (err: any) {
+      if (err.response?.data?.detail) {
+        setError(err.response.data.detail)
+      } else {
+        setError("Failed to create grant.")
+      }
+    } finally {
+      setCreating(false)
     }
   }
 
-  const handleRevoke = async (grantId: string) => {
+  const handleRevokeConfirm = async () => {
+    if (!revokeConfirmId) return
+    
+    setRevokeSubmitting(true)
+    setError(null)
+    
     try {
-      // In production, this would call your API
-      // await axios.delete(`${process.env.API_URL}/grants/${grantId}`)
+      await revokeGrant(revokeConfirmId)
+      setRevokeConfirmId(null)
       
-      setGrants(grants.filter(g => g.id !== grantId))
-    } catch (error) {
-      console.error("Failed to revoke grant:", error)
+      // Refresh grants list
+      const grantsData = await fetchGrants()
+      setGrants(grantsData)
+    } catch (err: any) {
+      if (err.response?.data?.detail) {
+        setError(err.response.data.detail)
+      } else {
+        setError("Failed to revoke grant.")
+      }
+    } finally {
+      setRevokeSubmitting(false)
     }
   }
+
+  // -----------------------------------------------------------------------
+  // UI helpers
+  // -----------------------------------------------------------------------
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -121,6 +314,104 @@ export default function Home() {
     return `${Math.floor(diff / 3600000)}h remaining`
   }
 
+  // -----------------------------------------------------------------------
+  // Auth loading state
+  // -----------------------------------------------------------------------
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary-500 mx-auto mb-4" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // -----------------------------------------------------------------------
+  // Not logged in — show login screen
+  // -----------------------------------------------------------------------
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full mx-4">
+          <div className="text-center mb-8">
+            <div className="bg-primary-500 p-3 rounded-xl inline-block mb-4">
+              <Key className="h-8 w-8 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">KubeTix</h1>
+            <p className="text-sm text-gray-500 mt-1">Temporary Kubernetes Access</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                placeholder="admin@kubetix.local"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                placeholder="admin123"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <div className="flex items-center space-x-2 text-red-600 text-sm bg-red-50 p-3 rounded-lg">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginSubmitting}
+              className="w-full bg-primary-500 hover:bg-primary-600 disabled:bg-primary-300 text-white px-4 py-2 rounded-lg flex items-center justify-center space-x-2 transition-colors"
+            >
+              {loginSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="h-4 w-4" />
+                  <span>Sign In</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <p className="text-xs text-gray-400 text-center mt-6">
+            Default credentials: admin@kubetix.local / admin123
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // -----------------------------------------------------------------------
+  // Logged in — main dashboard
+  // -----------------------------------------------------------------------
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
@@ -136,19 +427,48 @@ export default function Home() {
                 <p className="text-sm text-gray-500">Temporary Kubernetes Access</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Create Grant</span>
-            </button>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <User className="h-4 w-4" />
+                <span>{currentUser?.full_name || currentUser?.email}</span>
+              </div>
+              
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Create Grant</span>
+              </button>
+              
+              <button
+                onClick={handleLogout}
+                className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {error && (
+          <div className="mb-6 flex items-center space-x-2 text-red-600 bg-red-50 p-4 rounded-lg">
+            <AlertCircle className="h-5 w-5 flex-shrink-0" />
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-sm p-6">
@@ -196,8 +516,8 @@ export default function Home() {
           
           {loading ? (
             <div className="p-8 text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
-              <p className="mt-2 text-gray-500">Loading grants...</p>
+              <Loader2 className="h-8 w-8 animate-spin border-b-2 border-primary-500 mx-auto mb-2" />
+              <p className="text-gray-500">Loading grants...</p>
             </div>
           ) : grants.length === 0 ? (
             <div className="p-8 text-center">
@@ -256,13 +576,37 @@ export default function Home() {
                       </div>
                     </div>
                     
-                    <button
-                      onClick={() => handleRevoke(grant.id)}
-                      className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Revoke Grant"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
+                    {revokeConfirmId === grant.id ? (
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-red-600 font-medium">Revoke?</span>
+                        <button
+                          onClick={handleRevokeConfirm}
+                          disabled={revokeSubmitting}
+                          className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm rounded-lg transition-colors"
+                        >
+                          {revokeSubmitting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "Confirm"
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setRevokeConfirmId(null)}
+                          className="px-3 py-1 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm rounded-lg transition-colors"
+                          disabled={revokeSubmitting}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setRevokeConfirmId(grant.id)}
+                        className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Revoke Grant"
+                      >
+                        <EyeOff className="h-5 w-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -281,6 +625,7 @@ export default function Home() {
                 <button
                   onClick={() => setShowCreateModal(false)}
                   className="text-gray-400 hover:text-gray-600"
+                  disabled={creating}
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -347,19 +692,35 @@ export default function Home() {
                 </select>
               </div>
               
+              {error && (
+                <div className="flex items-center space-x-2 text-red-600 text-sm bg-red-50 p-3 rounded-lg">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+              
               <div className="flex space-x-3 pt-4">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  disabled={creating}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+                  className="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
+                  disabled={creating}
                 >
-                  Create Grant
+                  {creating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Create Grant</span>
+                  )}
                 </button>
               </div>
             </form>
