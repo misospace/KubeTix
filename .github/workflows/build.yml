@@ -87,7 +87,7 @@ jobs:
     - name: Install Kind (with checksum verification)
       run: |
         curl -Lo ./kind-linux-amd64 https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-        echo '513a7213d6d3332dd9ef27c24dab35e5ef10a04fa27274fe1c14d8a246493ded  ./kind-linux-amd64' | sha256sum -c -
+        echo 'bef140a1a96994029153dca8c00b1750b9a5a764fb9db2dc68d7bb40e8a29e8a  ./kind-linux-amd64' | sha256sum -c -
         chmod +x ./kind-linux-amd64
         sudo mv ./kind-linux-amd64 /usr/local/bin/kind
 
