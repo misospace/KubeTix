@@ -10,11 +10,11 @@ keywords:
   - security
   - access
   - temporary
-home: https://github.com/joryirving/KubeTix
+home: https://github.com/misospace/KubeTix
 sources:
-  - https://github.com/joryirving/KubeTix
+  - https://github.com/misospace/KubeTix
 maintainers:
   - name: Jory Irving
     email: jory@joryirving.com
 
-icon: https://raw.githubusercontent.com/joryirving/KubeTix/main/logo.png
+icon: https://raw.githubusercontent.com/misospace/KubeTix/main/logo.png

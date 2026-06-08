@@ -73,10 +73,9 @@ tolerations: []
 affinity: {}
 
 # Application secret key for JWT signing.
-# NOTE: Default is for development/testing only. MUST be overridden in production
-# with a unique, securely-generated key via --set or values override.
+# MUST be set in production to prevent JWT invalidation on Helm upgrades.
 # Generate one with: openssl rand -base64 32
-secretKey: "dev-secret-key-do-not-use-in-production-change-me-2026060801"
+secretKey: ""
 
 # Database configuration
 database:
