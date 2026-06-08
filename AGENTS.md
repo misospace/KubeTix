@@ -121,8 +121,9 @@ The test suite covers: encryption, database operations, grant lifecycle, expiry 
 
 ### Encryption
 
-- Fernet (AES-128-CBC) for kubeconfig encryption in the CLI tool
-- Key management: auto-generated on first run, persisted in `~/.kc-share/config.json`, or overridden via `KC_SHARE_KEY` env var
+- Fernet (AES-128-CBC) for kubeconfig encryption in both CLI and API
+- CLI key management: auto-generated on first run, persisted in `~/.kc-share/config.json`, or overridden via `KC_SHARE_KEY` env var
+- API key management: set `KUBECONFIG_ENCRYPTION_KEY` env var; generates an ephemeral key at startup if unset (with warning — existing grants will fail to decrypt after restart)
 
 ### Authentication (API)
 
