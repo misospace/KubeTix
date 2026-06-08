@@ -35,7 +35,7 @@ jobs:
       - name: Review PR with reusable AI reviewer
         if: github.event_name == 'pull_request'
         id: review
-        uses: misospace/pr-reviewer-action@14d5349357f8229c5e091b019f959e80868f44b6 # v1.1.0
+        uses: misospace/pr-reviewer-action@56e4c9abdb61bf56ee73e6eadb62280367694ac3 # v1.2.0
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           ai_primary_retries: "8"
