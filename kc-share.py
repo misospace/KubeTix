@@ -95,7 +95,7 @@ def init_db():
             cursor.execute("ALTER TABLE audit_log_new RENAME TO audit_log")
 
         # Migrate existing grants: move encrypted kubeconfig from metadata to new column
-        cursor.execute("SELECT id, metadata FROM grants WHERE metadata IS NOT NULL")
+        cursor.execute("SELECT id, metadata FROM grants WHERE metadata IS NOT NULL AND encrypted_kubeconfig IS NULL")
         for row in cursor.fetchall():
             grant_id, metadata_str = row
             if metadata_str:
@@ -345,7 +345,22 @@ def download_context(grant_id: str) -> str:
 
     encrypted_kc = grant.get("encrypted_kubeconfig")
     if not encrypted_kc:
-        raise ValueError("No encrypted kubeconfig found for this grant")
+        # Determine why: check if metadata still exists (legacy path or migration skipped)
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(grants)")
+        columns = {col[1]: idx for idx, col in enumerate(cursor.fetchall())}
+        if "metadata" in columns:
+            cursor.execute("SELECT metadata FROM grants WHERE id = ?", (grant_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                raise ValueError(
+                    "Grant has malformed or empty kubeconfig data. Please revoke and re-create this grant."
+                )
+        else:
+            conn.close()
+        raise ValueError("Grant has no kubeconfig data — it may need to be re-created.")
     return decrypt_data(encrypted_kc)
 
 
