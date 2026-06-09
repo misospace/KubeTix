@@ -24,7 +24,7 @@ Share secure, time-limited Kubernetes access with your team. No more permanent a
 
 ```bash
 # Clone and install
-git clone https://github.com/joryirving/KubeTix.git
+git clone https://github.com/misospace/KubeTix.git
 cd KubeTix
 pip install -r requirements.txt
 ```
