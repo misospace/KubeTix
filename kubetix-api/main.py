@@ -57,8 +57,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///./kubetix.db"
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
-    pool_pre_ping=True,
-)
+    )
 
 # Enable foreign key enforcement for SQLite (disabled by default)
 @event.listens_for(engine, "connect")
