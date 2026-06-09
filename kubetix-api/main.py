@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy import func
@@ -256,23 +256,29 @@ class Team(Base):
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    created_by = Column(String(36), nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_teams_created_by", "created_by"),
+    )
 
 
 class TeamMember(Base):
     __tablename__ = "team_members"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    team_id = Column(String(36), nullable=False)
-    user_id = Column(String(36), nullable=False)
+    team_id = Column(String(36), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     role = Column(String(50), nullable=False)  # owner, admin, member
     joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         # Unique constraint: one role per user per team
         UniqueConstraint('team_id', 'user_id', name='uq_team_user'),
+        Index("ix_team_members_team_id", "team_id"),
+        Index("ix_team_members_user_id", "user_id"),
     )
 
 
@@ -296,7 +302,7 @@ class Grant(Base):
     __tablename__ = "grants"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     cluster_name = Column(String(255), nullable=False)
     namespace = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False)
@@ -306,16 +312,30 @@ class Grant(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("ix_grants_user_id", "user_id"),
+        Index("ix_grants_revoked", "revoked"),
+        Index("ix_grants_expires_at", "expires_at"),
+        Index("ix_grants_user_revoked_expires", "user_id", "revoked", "expires_at"),
+    )
+
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
-    grant_id = Column(String(36), nullable=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    grant_id = Column(String(36), ForeignKey("grants.id", ondelete="SET NULL"), nullable=True)
     action = Column(String(50), nullable=False)
     details = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_audit_log_user_id", "user_id"),
+        Index("ix_audit_log_grant_id", "grant_id"),
+        Index("ix_audit_log_created_at", "created_at"),
+        Index("ix_audit_log_user_created", "user_id", "created_at"),
+    )
 
 
 # ---------------------------------------------------------------------------
