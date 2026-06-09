@@ -278,7 +278,7 @@ class TestKubeTixE2E:
             },
             headers={"Authorization": f"Bearer {token}"}
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
 
         response = requests.post(
             f"{wait_for_api}/grants",
@@ -288,7 +288,7 @@ class TestKubeTixE2E:
             },
             headers={"Authorization": f"Bearer {token}"}
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_12_invalid_role(self, wait_for_api, kubeconfig):
         """Test invalid role validation."""
@@ -309,7 +309,7 @@ class TestKubeTixE2E:
             },
             headers={"Authorization": f"Bearer {token}"}
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     def test_13_missing_kubeconfig(self, wait_for_api):
         """Test behavior when kubeconfig is missing."""
