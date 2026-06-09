@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy import func
@@ -53,7 +53,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 # Database
 DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///./kubetix.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    )
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -260,6 +265,10 @@ class Team(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("ix_teams_created_by", "created_by"),
+    )
+
 
 class TeamMember(Base):
     __tablename__ = "team_members"
@@ -273,6 +282,8 @@ class TeamMember(Base):
     __table_args__ = (
         # Unique constraint: one role per user per team
         UniqueConstraint('team_id', 'user_id', name='uq_team_user'),
+        Index("ix_team_members_team_id", "team_id"),
+        Index("ix_team_members_user_id", "user_id"),
     )
 
 
@@ -306,6 +317,13 @@ class Grant(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("ix_grants_user_id", "user_id"),
+        Index("ix_grants_revoked", "revoked"),
+        Index("ix_grants_expires_at", "expires_at"),
+        Index("ix_grants_user_revoked_expires", "user_id", "revoked", "expires_at"),
+    )
+
 
 class AuditLog(Base):
     __tablename__ = "audit_log"
@@ -316,6 +334,13 @@ class AuditLog(Base):
     action = Column(String(50), nullable=False)
     details = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_audit_log_user_id", "user_id"),
+        Index("ix_audit_log_grant_id", "grant_id"),
+        Index("ix_audit_log_created_at", "created_at"),
+        Index("ix_audit_log_user_created", "user_id", "created_at"),
+    )
 
 
 # ---------------------------------------------------------------------------
