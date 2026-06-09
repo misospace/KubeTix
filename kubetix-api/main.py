@@ -1,92 +1,59 @@
 """
-KubeTix Backend API
-FastAPI-based REST API for KubeTix
+KubeTix Backend API — modular entry point.
+
+All business logic lives in sub-packages:
+  - models   : SQLAlchemy ORM classes
+  - schemas  : Pydantic request/response models
+  - database : engine, sessions, init_db()
+  - auth     : password hashing, JWT, current-user dependency
+  - oidc     : PKCE, token exchange, SSO/OIDC helpers
+  - grants   : grant CRUD + encryption
+  - teams    : team CRUD
 """
 
-import subprocess
-import sys
-import secrets
-import sqlite3
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-from pathlib import Path
+from typing import List
 
-from fastapi import FastAPI, HTTPException, Depends, status, Request, Header
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from passlib.context import CryptContext
-from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, Index, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import func
+import secrets
 
-# Rate limiting support
+from fastapi import FastAPI, HTTPException, Depends, Request, Header, status
+
+# ---------------------------------------------------------------------------
+# Rate limiting (optional)
+# ---------------------------------------------------------------------------
+
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
-    
+
     HAS_RATE_LIMITING = True
-    # Disable rate limiting in test mode to avoid 429 errors
-    if os.environ.get("TESTING"):
-        HAS_RATE_LIMITING = False
 except ImportError:
     HAS_RATE_LIMITING = False
 
-# Authenticated encryption for kubeconfig storage
-try:
-    from cryptography.fernet import Fernet
-except ImportError:
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "cryptography"]
-    )
-    from cryptography.fernet import Fernet
+# ---------------------------------------------------------------------------
+# CORS middleware
+# ---------------------------------------------------------------------------
+from fastapi.middleware.cors import CORSMiddleware
 
-_ENCRYPTION_KEY = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or None
+_CORS_ORIGINS_RAW = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:3000")
+ALLOWED_ORIGINS = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()]
 
-# Configuration
-SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or secrets.token_urlsafe(32)
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
 
-# Database
-DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///./kubetix.db"
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    )
-
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# FastAPI app
 app = FastAPI(
     title="KubeTix API",
     description="Temporary Kubernetes Access Manager",
-    version="0.1.0"
+    version="0.1.0",
 )
 
-
-# Rate limiter (initialized after app creation if slowapi is available)
-limiter = None
 if HAS_RATE_LIMITING:
     limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-# ---------------------------------------------------------------------------
-# CORS — locked to explicit origins (P0-1 fix)
-# ---------------------------------------------------------------------------
-# Allow multiple origins via comma-separated env var; falls back to a single
-# localhost origin so the dev server still works without configuration.
-_CORS_ORIGINS_RAW = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:3000")
-ALLOWED_ORIGINS = [
-    o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()
-]
 
 app.add_middleware(
     CORSMiddleware,
@@ -97,433 +64,16 @@ app.add_middleware(
 )
 
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 # ---------------------------------------------------------------------------
-# OIDC helpers (P0-2 fix — real token exchange & user provisioning)
-# ---------------------------------------------------------------------------
-
-def _oidc_endpoints(issuer: str) -> dict:
-    """Return OIDC discovery endpoints for the given issuer."""
-    return {
-        "token_endpoint": f"{issuer.rstrip('/')}/oauth/token",
-        "userinfo_endpoint": f"{issuer.rstrip('/')}/oauth/userinfo",
-    }
-
-
-def _exchange_code_for_tokens(issuer: str, client_id: str, client_secret: str,
-                               code: str, redirect_uri: str) -> dict:
-    """Exchange an authorization code for access + ID tokens via the token endpoint."""
-    import httpx
-
-    endpoints = _oidc_endpoints(issuer)
-    token_url = endpoints["token_endpoint"]
-
-    payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": redirect_uri,
-        "client_id": client_id,
-        "client_secret": client_secret,
-    }
-
-    resp = httpx.post(token_url, data=payload, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _get_userinfo(issuer: str, access_token: str) -> dict:
-    """Fetch user info from the OIDC provider using the access token."""
-    import httpx
-
-    endpoints = _oidc_endpoints(issuer)
-    userinfo_url = endpoints["userinfo_endpoint"]
-
-    headers = {"Authorization": f"Bearer {access_token}"}
-    resp = httpx.get(userinfo_url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _provision_user(db: Session, email: str, full_name: Optional[str],
-                    sso_provider: str, sso_id: Optional[str]) -> "User":
-    """Create or update a user provisioned via SSO/OIDC. Returns the user."""
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        user = User(
-            id=secrets.token_urlsafe(16),
-            email=email,
-            hashed_password=None,          # SSO-only user
-            full_name=full_name,
-            sso_provider=sso_provider,
-            sso_id=sso_id,
-        )
-        db.add(user)
-    else:
-        # Update existing user if they don't yet have SSO attributes
-        if user.sso_provider is None:
-            user.sso_provider = sso_provider
-            user.sso_id = sso_id
-        if full_name and not user.full_name:
-            user.full_name = full_name
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-# ---------------------------------------------------------------------------
-# PKCE helpers (audit finding: CSRF / callback leakage — #60)
-# ---------------------------------------------------------------------------
-
-def _generate_pkce_params() -> tuple[str, str]:
-    """Generate a PKCE code_verifier and its S256 code_challenge.
-
-    Per RFC 7636: verifier = 43-128 chars [A-Za-z0-9~-],
-    challenge   = base64url(sha256(verifier)).rstrip('=').
-    """
-    import hashlib
-    import base64
-
-    code_verifier = secrets.token_urlsafe(64)  # 86 chars, well within limits
-    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    code_challenge = base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode()
-    return code_verifier, code_challenge
-
-
-def _create_auth_code_record(db: Session, code_challenge: str, state: str,
-                              provider: str) -> str:
-    """Persist PKCE challenge + CSRF state; returns the auth_code id."""
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-    record = AuthCode(
-        id=secrets.token_urlsafe(16),
-        code_challenge=code_challenge,
-        state=state,
-        provider=provider,
-        expires_at=expires_at,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record.id
-
-
-def _verify_auth_code(db: Session, auth_code_id: str,
-                      received_state: str, code_verifier: str) -> bool:
-    """Verify state match + PKCE challenge, mark used, return True on success."""
-    import hashlib
-    import base64 as b64mod
-
-    now = datetime.now(timezone.utc)
-    record = db.query(AuthCode).filter(
-        AuthCode.id == auth_code_id,
-        AuthCode.used == False,
-        AuthCode.state == received_state,
-        AuthCode.expires_at > now,
-    ).first()
-    if record is None:
-        return False
-
-    # Verify PKCE: compute challenge from the verifier and compare
-    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    computed_challenge = b64mod.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode()
-    if computed_challenge != record.code_challenge:
-        return False
-
-    # Mark as used (best-effort atomicity)
-    record.used = True
-    db.commit()
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Database Models
-# ---------------------------------------------------------------------------
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=True)  # NULL for SSO users
-    full_name = Column(String(255))
-    is_admin = Column(Boolean, default=False)
-    sso_provider = Column(String(50), nullable=True)  # google, github, okta, etc.
-    sso_id = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-
-class Team(Base):
-    __tablename__ = "teams"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    name = Column(String(255), nullable=False)
-    description = Column(Text)
-    created_by = Column(String(36), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("ix_teams_created_by", "created_by"),
-    )
-
-
-class TeamMember(Base):
-    __tablename__ = "team_members"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    team_id = Column(String(36), nullable=False)
-    user_id = Column(String(36), nullable=False)
-    role = Column(String(50), nullable=False)  # owner, admin, member
-    joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        # Unique constraint: one role per user per team
-        UniqueConstraint('team_id', 'user_id', name='uq_team_user'),
-        Index("ix_team_members_team_id", "team_id"),
-        Index("ix_team_members_user_id", "user_id"),
-    )
-
-
-class AuthCode(Base):
-    """Store PKCE code_challenge + CSRF state for OAuth/OIDC flows.
-
-    Records expire after 10 minutes and are marked used on successful callback.
-    """
-    __tablename__ = "auth_codes"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    code_challenge = Column(String(128), nullable=False)  # PKCE S256 challenge
-    state = Column(String(128), nullable=False)            # CSRF state token
-    provider = Column(String(50), nullable=False)          # e.g. 'google', 'oidc'
-    expires_at = Column(DateTime, nullable=False)
-    used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-
-class Grant(Base):
-    __tablename__ = "grants"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
-    cluster_name = Column(String(255), nullable=False)
-    namespace = Column(String(255), nullable=True)
-    role = Column(String(50), nullable=False)
-    encrypted_kubeconfig = Column(Text, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("ix_grants_user_id", "user_id"),
-        Index("ix_grants_revoked", "revoked"),
-        Index("ix_grants_expires_at", "expires_at"),
-        Index("ix_grants_user_revoked_expires", "user_id", "revoked", "expires_at"),
-    )
-
-
-class AuditLog(Base):
-    __tablename__ = "audit_log"
-
-    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
-    grant_id = Column(String(36), nullable=True)
-    action = Column(String(50), nullable=False)
-    details = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("ix_audit_log_user_id", "user_id"),
-        Index("ix_audit_log_grant_id", "grant_id"),
-        Index("ix_audit_log_created_at", "created_at"),
-        Index("ix_audit_log_user_created", "user_id", "created_at"),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Pydantic Models
-# ---------------------------------------------------------------------------
-
-class UserCreate(BaseModel):
-    email: str
-    password: str
-    full_name: Optional[str] = None
-
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
-
-
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    full_name: Optional[str] = None
-    is_admin: bool
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class GrantCreate(BaseModel):
-    cluster_name: str
-    namespace: Optional[str] = None
-    role: str = "view"
-    expiry_hours: int = 4
-
-
-class GrantResponse(BaseModel):
-    id: str
-    cluster_name: str
-    namespace: Optional[str] = None
-    role: str
-    expires_at: datetime
-    revoked: bool
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class GrantWithKubeconfig(BaseModel):
-    id: str
-    cluster_name: str
-    namespace: Optional[str] = None
-    role: str
-    expires_at: datetime
-    kubeconfig: str
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    user: UserResponse
-
-
-# Team Models
-class TeamCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-
-class TeamResponse(BaseModel):
-    id: str
-    name: str
-    description: Optional[str] = None
-    created_by: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class TeamMemberCreate(BaseModel):
-    email: str
-    role: str = "member"  # owner, admin, member
-
-
-class TeamMemberResponse(BaseModel):
-    id: str
-    user_id: str
-    email: str
-    full_name: Optional[str] = None
-    role: str
-    joined_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ---------------------------------------------------------------------------
-# Database Functions
-# ---------------------------------------------------------------------------
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
-
-
-# ---------------------------------------------------------------------------
-# Authentication Functions
-# ---------------------------------------------------------------------------
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-
-def get_current_user(
-    authorization: str = Header(None),
-    db: Session = Depends(get_db)
-):
-    # Guard: reject missing or empty tokens before jwt.decode()
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No authentication token provided",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    token = authorization[7:]
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return user
-
-
-# ---------------------------------------------------------------------------
-# API Endpoints
+# Startup — create tables + optional admin bootstrap
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def startup_event():
+    from kubetix_api.database import init_db
+
     init_db()
-    # Secure admin bootstrap: require explicit INITIAL_ADMIN_PASSWORD env var.
-    # No default credentials — fail closed in production.
-    # Local-only bootstrap via env var; never bake passwords into code or docs.
+
     _admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
     if not _admin_password:
         import logging
@@ -535,16 +85,20 @@ async def startup_event():
         )
         return
 
+    from kubetix_api.database import SessionLocal
+    from kubetix_api.models import User
+    from kubetix_api.auth import get_password_hash
+
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
         if not admin:
             admin = User(
-                id=secrets.token_urlsafe(16),
+                id=__import__("secrets").token_urlsafe(16),
                 email="admin@kubetix.local",
                 hashed_password=get_password_hash(_admin_password),
                 full_name="Admin User",
-                is_admin=True
+                is_admin=True,
             )
             db.add(admin)
             db.commit()
@@ -552,24 +106,43 @@ async def startup_event():
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Re-export shared dependencies for route handlers and tests
+# ---------------------------------------------------------------------------
+
+from kubetix_api.database import get_db
+from kubetix_api.auth import get_current_user, get_password_hash, create_access_token, verify_password
+from kubetix_api.models import Base, User, Team, TeamMember, AuthCode, Grant, AuditLog
+from kubetix_api.schemas import (
+    UserCreate, UserLogin, UserResponse,
+    GrantCreate, GrantResponse, GrantWithKubeconfig, Token,
+    TeamCreate, TeamResponse, TeamMemberCreate, TeamMemberResponse,
+)
+
+# ---------------------------------------------------------------------------
+# User endpoints
+# ---------------------------------------------------------------------------
+
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5 per hour") if HAS_RATE_LIMITING else (lambda x: x)
-async def register_user(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
-    # Check if user exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+async def register_user(
+    request: Request,
+    user_data: UserCreate,
+    db=Depends(get_db),
+):
+    from kubetix_api.auth import get_password_hash
+    from kubetix_api.models import User as UserModel
 
-    # Create new user
-    new_user = User(
-        id=secrets.token_urlsafe(16),
+    existing = db.query(UserModel).filter(UserModel.email == user_data.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = UserModel(
+        id=__import__("secrets").token_urlsafe(16),
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         full_name=user_data.full_name,
-        is_admin=False
+        is_admin=False,
     )
 
     db.add(new_user)
@@ -581,33 +154,38 @@ async def register_user(request: Request, user_data: UserCreate, db: Session = D
 
 @app.post("/login", response_model=Token)
 @limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
-async def login(request: Request, user_data: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
+async def login(
+    request: Request,
+    user_data: UserLogin,
+    db=Depends(get_db),
+):
+    from kubetix_api.auth import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+    from kubetix_api.models import User as UserModel
 
-    # Guard: SSO-only users cannot log in with a password
+    user = db.query(UserModel).filter(UserModel.email == user_data.email).first()
     if not user or user.hashed_password is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     access_token = create_access_token(
         data={"sub": user.email},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user
+        "user": user,
     }
 
 
@@ -616,415 +194,133 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@app.get("/grants", response_model=List[GrantResponse])
-async def list_grants(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    grants = db.query(Grant).filter(
-        Grant.user_id == current_user.id,
-        Grant.revoked == False,
-        Grant.expires_at > datetime.now(timezone.utc).replace(tzinfo=None)
-    ).order_by(Grant.created_at.desc()).all()
+# ---------------------------------------------------------------------------
+# Grant endpoints
+# ---------------------------------------------------------------------------
 
-    return grants
+from kubetix_api.grants import (
+    list_grants_for_user, create_grant, get_grant, revoke_grant, get_audit_log,
+)
+
+
+@app.get("/grants", response_model=List[GrantResponse])
+async def list_grants(current_user: User = Depends(get_current_user), db=Depends(get_db)):
+    return list_grants_for_user(current_user, db)
 
 
 @app.post("/grants", response_model=GrantResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("10 per hour") if HAS_RATE_LIMITING else (lambda x: x)
-async def create_grant(
+async def create_grant_endpoint(
     request: Request,
     grant_data: GrantCreate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Validate role
-    if grant_data.role not in ["view", "edit", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid role. Must be view, edit, or admin"
-        )
-
-    # Validate expiry
-    if grant_data.expiry_hours < 1 or grant_data.expiry_hours > 720:  # 1 hour to 30 days
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Expiry must be between 1 and 720 hours"
-        )
-
-    # Get kubeconfig
-    kubeconfig_path = os.environ.get("KUBECONFIG", Path.home() / ".kube" / "config")
-
-    if not os.path.exists(kubeconfig_path):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Kubeconfig not found at {kubeconfig_path}"
-        )
-
-    with open(kubeconfig_path) as f:
-        kubeconfig = f.read()
-
-    # Encrypt kubeconfig with Fernet authenticated encryption.
-    _key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
-    if not _key:
-        _key = Fernet.generate_key().decode()
-        import logging
-        logging.warning(
-            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
-            "existing grants will fail to decrypt after restart."
-        )
-    fernet = Fernet(_key.encode())
-    encrypted_kubeconfig = fernet.encrypt(kubeconfig.encode()).decode()
-
-    # Create grant
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=grant_data.expiry_hours)
-
-    new_grant = Grant(
-        id=secrets.token_urlsafe(16),
-        user_id=current_user.id,
-        cluster_name=grant_data.cluster_name,
-        namespace=grant_data.namespace,
-        role=grant_data.role,
-        encrypted_kubeconfig=encrypted_kubeconfig,
-        expires_at=expires_at
-    )
-
-    db.add(new_grant)
-
-    # Log audit
-    audit = AuditLog(
-        user_id=current_user.id,
-        grant_id=new_grant.id,
-        action="created",
-        details=f"Created grant for {grant_data.cluster_name}"
-    )
-    db.add(audit)
-
-    db.commit()
-    db.refresh(new_grant)
-
-    return new_grant
+    return create_grant(grant_data, current_user, db)
 
 
 @app.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
 async def download_grant(
     grant_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    grant = db.query(Grant).filter(Grant.id == grant_id).first()
-
-    if not grant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Grant not found"
-        )
-
-    if grant.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this grant"
-        )
-
-    if grant.revoked:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Grant has been revoked"
-        )
-
-    expires_at = grant.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Grant has expired"
-        )
-
-    # Decrypt kubeconfig
-    _key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
-    if not _key:
-        _key = Fernet.generate_key().decode()
-        import logging
-        logging.warning(
-            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
-            "existing grants will fail to decrypt after restart."
-        )
-    fernet = Fernet(_key.encode())
-    kubeconfig = fernet.decrypt(grant.encrypted_kubeconfig.encode()).decode()
-
-    return {
-        "id": grant.id,
-        "cluster_name": grant.cluster_name,
-        "namespace": grant.namespace,
-        "role": grant.role,
-        "expires_at": grant.expires_at,
-        "kubeconfig": kubeconfig
-    }
+    return get_grant(grant_id, current_user, db)
 
 
 @app.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_grant(
+async def revoke_grant_endpoint(
     grant_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    grant = db.query(Grant).filter(Grant.id == grant_id).first()
-
-    if not grant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Grant not found"
-        )
-
-    # Only owner or admin can revoke
-    if grant.user_id != current_user.id and not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to revoke this grant"
-        )
-
-    grant.revoked = True
-    db.commit()
-
-    # Log audit
-    audit = AuditLog(
-        user_id=current_user.id,
-        grant_id=grant_id,
-        action="revoked",
-        details="Manually revoked"
-    )
-    db.add(audit)
-    db.commit()
+    revoke_grant(grant_id, current_user, db)
 
 
 @app.get("/audit", response_model=List[dict])
-async def get_audit_log(
+async def get_audit_log_endpoint(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Admins see all logs, users see their own
-    if current_user.is_admin:
-        logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
-    else:
-        logs = db.query(AuditLog).filter(
-            AuditLog.user_id == current_user.id
-        ).order_by(AuditLog.created_at.desc()).limit(100).all()
-
-    return [
-        {
-            "id": log.id,
-            "user_id": log.user_id,
-            "grant_id": log.grant_id,
-            "action": log.action,
-            "details": log.details,
-            "created_at": log.created_at
-        }
-        for log in logs
-    ]
+    return get_audit_log(db, current_user)
 
 
 # ---------------------------------------------------------------------------
-# Team Endpoints
+# Team endpoints
 # ---------------------------------------------------------------------------
+
+from kubetix_api.teams import (
+    create_team, list_teams, get_team, add_team_member, remove_team_member, list_team_members,
+)
+
 
 @app.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
-async def create_team(
+async def create_team_endpoint(
     team_data: TeamCreate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    new_team = Team(
-        id=secrets.token_urlsafe(16),
-        name=team_data.name,
-        description=team_data.description,
-        created_by=current_user.id
-    )
-
-    db.add(new_team)
-
-    # Add creator as owner
-    member = TeamMember(
-        id=secrets.token_urlsafe(16),
-        team_id=new_team.id,
-        user_id=current_user.id,
-        role="owner"
-    )
-    db.add(member)
-
-    db.commit()
-    db.refresh(new_team)
-
-    return new_team
+    return create_team(team_data, current_user, db)
 
 
 @app.get("/teams", response_model=List[TeamResponse])
-async def list_teams(
+async def list_teams_endpoint(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Get all teams user is a member of
-    from sqlalchemy import and_
-
-    team_ids = db.query(TeamMember.team_id).filter(
-        TeamMember.user_id == current_user.id
-    ).subquery()
-
-    teams = db.query(Team).filter(
-        Team.id.in_(team_ids)
-    ).order_by(Team.created_at.desc()).all()
-
-    return teams
+    return list_teams(current_user, db)
 
 
 @app.get("/teams/{team_id}", response_model=TeamResponse)
-async def get_team(
+async def get_team_endpoint(
     team_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    team = db.query(Team).filter(Team.id == team_id).first()
-
-    if not team:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Team not found"
-        )
-
-    # Check if user is member
-    member = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == current_user.id
-    ).first()
-
-    if not member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this team"
-        )
-
-    return team
+    return get_team(team_id, current_user, db)
 
 
 @app.post("/teams/{team_id}/members", response_model=TeamMemberResponse)
-async def add_team_member(
+async def add_team_member_endpoint(
     team_id: str,
     member_data: TeamMemberCreate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Check if user is owner or admin of team
-    member = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == current_user.id
-    ).first()
-
-    if not member or member.role not in ["owner", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only team owners and admins can add members"
-        )
-
-    # Find user by email
-    target_user = db.query(User).filter(User.email == member_data.email).first()
-
-    if not target_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    # Check if already a member
-    existing = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == target_user.id
-    ).first()
-
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is already a member of this team"
-        )
-
-    # Add member
-    new_member = TeamMember(
-        id=secrets.token_urlsafe(16),
-        team_id=team_id,
-        user_id=target_user.id,
-        role=member_data.role
-    )
-
-    db.add(new_member)
-    db.commit()
-    db.refresh(new_member)
-
-    return new_member
+    return add_team_member(team_id, member_data, current_user, db)
 
 
 @app.delete("/teams/{team_id}/members/{user_id}")
-async def remove_team_member(
+async def remove_team_member_endpoint(
     team_id: str,
     user_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Check if user is owner of team
-    member = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == current_user.id
-    ).first()
-
-    if not member or member.role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only team owners can remove members"
-        )
-
-    # Can't remove yourself
-    if user_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot remove yourself from the team"
-        )
-
-    # Remove member
-    db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == user_id
-    ).delete()
-
-    db.commit()
+    remove_team_member(team_id, user_id, current_user, db)
 
 
 @app.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
-async def list_team_members(
+async def list_team_members_endpoint(
     team_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    # Check if user is member
-    member = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == current_user.id
-    ).first()
-
-    if not member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this team"
-        )
-
-    members = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id
-    ).join(User, TeamMember.user_id == User.id).all()
-
-    return members
+    return list_team_members(team_id, current_user, db)
 
 
 # ---------------------------------------------------------------------------
-# SSO/Authentik/OIDC Endpoints — REAL implementations (P0-2 fix)
-# Hardened against CSRF and callback leakage (audit #60)
+# SSO / OIDC endpoints
 # ---------------------------------------------------------------------------
+
+from kubetix_api.oidc import (
+    _generate_pkce_params,
+    _create_auth_code_record,
+    _verify_auth_code,
+    _exchange_code_for_tokens,
+    _get_userinfo,
+)
+
 
 @app.post("/auth/sso/callback")
 @limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
@@ -1032,20 +328,11 @@ async def sso_callback(
     request: Request,
     provider: str,
     code: str,
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    """
-    Handle SSO callback from OAuth/OIDC provider.
-    Supports: Google, GitHub, Okta, Azure AD, Authentik
+    """Handle SSO callback from OAuth/OIDC providers."""
+    import httpx
 
-    Real implementation: exchanges the authorization code for tokens at the
-    provider's token endpoint, fetches user info, provisions/updates the user
-    in the local database, and returns a JWT access token.
-
-    Security (audit #60): verifies CSRF state and PKCE code_verifier before
-    exchanging the code, and sanitises error messages to prevent information leakage.
-    """
-    # Map provider names to their configuration
     provider_configs = {
         "google": {
             "token_url": "https://oauth2.googleapis.com/token",
@@ -1081,8 +368,8 @@ async def sso_callback(
 
     if provider not in provider_configs:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported provider. Supported: {list(provider_configs.keys())}"
+            status_code=400,
+            detail=f"Unsupported provider. Supported: {list(provider_configs.keys())}",
         )
 
     cfg = provider_configs[provider]
@@ -1091,38 +378,27 @@ async def sso_callback(
 
     if not all([client_id, client_secret]):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"SSO provider '{provider}' is not configured. Set {cfg['client_id_env']} and {cfg['client_secret_env']}."
+            status_code=500,
+            detail=f"SSO provider '{provider}' is not configured. Set {cfg['client_id_env']} and {cfg['client_secret_env']}.",
         )
 
-    # --- CSRF state + PKCE verification (audit #60) ---
+    # CSRF state + PKCE verification
     auth_code_id = request.query_params.get("state", "")
     code_verifier = request.query_params.get("code_verifier", "")
     if not auth_code_id or not code_verifier:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing required parameters: state and code_verifier"
+            status_code=400,
+            detail="Missing required parameters: state and code_verifier",
         )
     if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired authorization state"
-        )
+        raise HTTPException(status_code=400, detail="Invalid or expired authorization state")
 
-    import httpx
-
-    # Step 1: Exchange code for access token
     redirect_uri = os.environ.get("SSO_REDIRECT_URI", f"http://localhost:8000/auth/sso/callback?provider={provider}")
 
     if provider == "github":
-        # GitHub uses a slightly different token exchange format
         resp = httpx.post(
             cfg["token_url"],
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code": code,
-            },
+            data={"client_id": client_id, "client_secret": client_secret, "code": code},
             headers={"Accept": "application/json"},
             timeout=10,
         )
@@ -1140,37 +416,21 @@ async def sso_callback(
         )
 
     if resp.status_code != 200:
-        # Sanitised error: do not leak raw provider response body
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to exchange authorization code for token"
-        )
+        raise HTTPException(status_code=401, detail="Failed to exchange authorization code for token")
 
     token_data = resp.json()
     access_token = token_data.get("access_token")
-
     if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No access token received from provider"
-        )
+        raise HTTPException(status_code=401, detail="No access token received from provider")
 
-    # Step 2: Fetch user info from provider
-    headers = {"Authorization": f"Bearer {access_token}"} if provider != "github" else {}
-    if provider == "github":
-        headers = {"Authorization": f"token {access_token}", "Accept": "application/json"}
-
+    headers = {"Authorization": f"Bearer {access_token}"} if provider != "github" else {"Authorization": f"token {access_token}", "Accept": "application/json"}
     userinfo_resp = httpx.get(cfg["userinfo_url"], headers=headers, timeout=10)
     if userinfo_resp.status_code != 200:
-        # Sanitised error: do not leak raw provider response body
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to fetch user information from provider"
-        )
+        raise HTTPException(status_code=401, detail="Failed to fetch user information from provider")
 
     userinfo = userinfo_resp.json()
 
-    # Step 3: Extract email (provider-specific)
+    # Provider-specific email extraction
     if provider == "google":
         email = userinfo.get("email")
         full_name = userinfo.get("name")
@@ -1190,54 +450,29 @@ async def sso_callback(
         email = userinfo.get("email")
 
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Provider did not return an email address"
-        )
+        raise HTTPException(status_code=401, detail="Provider did not return an email address")
 
-    # Step 4: Provision user in local DB
     sso_id = str(userinfo.get("sub") or userinfo.get("id") or userinfo.get("github_id", ""))
-    user = _provision_user(db, email=email, full_name=full_name,
-                          sso_provider=provider, sso_id=sso_id)
 
-    # Step 5: Return JWT token
+    from kubetix_api.models import provision_user
+    user = provision_user(db, email=email, full_name=full_name, sso_provider=provider, sso_id=sso_id)
+
     access_token_jwt = create_access_token(
         data={"sub": user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
-    return {
-        "access_token": access_token_jwt,
-        "token_type": "bearer",
-        "user": user,
-    }
+    return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
 
 @app.get("/auth/sso/{provider}/login")
 async def sso_login(provider: str):
-    """
-    Initiate SSO login flow.
-    Returns the OAuth authorization URL to redirect the user to.
-
-    Security (audit #60): includes PKCE code_challenge and a CSRF state token
-    in the auth URL.  The client must send both ``state`` (= auth_code_id) and
-    ``code_verifier`` back to the callback endpoint.
-    """
-    # Redirect URI for all SSO providers (provider-specific callback path)
-    redirect_uri = os.environ.get(
-        "SSO_REDIRECT_URI",
-        f"http://localhost:8000/auth/sso/callback?provider={provider}"
-    )
+    """Initiate SSO login flow — returns auth URL + code_verifier."""
+    import urllib.parse
 
     provider_configs = {
-        "google": {
-            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
-            "scope": "openid email profile",
-        },
-        "github": {
-            "auth_url": "https://github.com/login/oauth/authorize",
-            "scope": "user:email",
-        },
+        "google": {"auth_url": "https://accounts.google.com/o/oauth2/v2/auth", "scope": "openid email profile"},
+        "github": {"auth_url": "https://github.com/login/oauth/authorize", "scope": "user:email"},
         "okta": {
             "auth_url": f"{os.environ.get('SSO_OKTA_ISSUER', '{your-okta-domain}')}/oauth2/default/v1/authorize",
             "scope": "openid email profile",
@@ -1254,8 +489,8 @@ async def sso_login(provider: str):
 
     if provider not in provider_configs:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported provider. Supported: {list(provider_configs.keys())}"
+            status_code=400,
+            detail=f"Unsupported provider. Supported: {list(provider_configs.keys())}",
         )
 
     cfg = provider_configs[provider]
@@ -1263,31 +498,30 @@ async def sso_login(provider: str):
 
     if not client_id:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"SSO provider '{provider}' is not configured. Set SSO_{provider.upper()}_CLIENT_ID."
+            status_code=400,
+            detail=f"SSO provider '{provider}' is not configured. Set SSO_{provider.upper()}_CLIENT_ID.",
         )
 
-    import urllib.parse
-
-    # --- PKCE + CSRF state (audit #60) ---
     code_verifier, code_challenge = _generate_pkce_params()
-    csrf_state = secrets.token_urlsafe(32)  # opaque CSRF token
+    csrf_state = secrets.token_urlsafe(32)
 
-    # Store challenge + state in DB for later verification on callback
+    from kubetix_api.database import SessionLocal
     db = SessionLocal()
     try:
         auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, provider)
     finally:
         db.close()
 
-    params: dict = {
+    redirect_uri = os.environ.get("SSO_REDIRECT_URI", f"http://localhost:8000/auth/sso/callback?provider={provider}")
+
+    params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": cfg["scope"],
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "state": auth_code_id,  # serves as both CSRF state and DB lookup key
+        "state": auth_code_id,
     }
 
     auth_url = f"{cfg['auth_url']}?{urllib.parse.urlencode(params)}"
@@ -1295,7 +529,7 @@ async def sso_login(provider: str):
     return {
         "provider": provider,
         "auth_url": auth_url,
-        "code_verifier": code_verifier,  # client must send this back to callback
+        "code_verifier": code_verifier,
         "message": "Redirect user to auth_url; store code_verifier for the callback",
     }
 
@@ -1305,19 +539,9 @@ async def sso_login(provider: str):
 async def oidc_callback(
     request: Request,
     code: str,
-    db: Session = Depends(get_db)
+    db=Depends(get_db),
 ):
-    """
-    Generic OIDC callback endpoint.
-    Works with any compliant OIDC provider (Authentik, Keycloak, Okta, etc.).
-
-    Real implementation: exchanges the authorization code for tokens at the
-    issuer's token endpoint, fetches user info, provisions/updates the user,
-    and returns a JWT access token.
-
-    Security (audit #60): verifies CSRF state and PKCE code_verifier before
-    exchanging the code, and sanitises error messages.
-    """
+    """Generic OIDC callback endpoint."""
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
     oidc_client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
@@ -1325,131 +549,79 @@ async def oidc_callback(
 
     if not all([oidc_issuer, oidc_client_id, oidc_client_secret]):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="OIDC not configured. Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET"
+            status_code=500,
+            detail="OIDC not configured. Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET",
         )
 
-    # --- CSRF state + PKCE verification (audit #60) ---
     auth_code_id = request.query_params.get("state", "")
     code_verifier = request.query_params.get("code_verifier", "")
     if not auth_code_id or not code_verifier:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing required parameters: state and code_verifier"
-        )
+        raise HTTPException(status_code=400, detail="Missing required parameters: state and code_verifier")
     if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired authorization state"
-        )
+        raise HTTPException(status_code=400, detail="Invalid or expired authorization state")
 
-    # Step 1: Exchange code for tokens at the issuer's token endpoint
     try:
-        token_data = _exchange_code_for_tokens(
-            issuer=oidc_issuer,
-            client_id=oidc_client_id,
-            client_secret=oidc_client_secret,
-            code=code,
-            redirect_uri=oidc_redirect_uri,
-        )
+        token_data = _exchange_code_for_tokens(oidc_issuer, oidc_client_id, oidc_client_secret, code, oidc_redirect_uri)
     except Exception:
-        # Sanitised error: do not leak raw exception / provider details
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to exchange authorization code for token"
-        )
+        raise HTTPException(status_code=401, detail="Failed to exchange authorization code for token")
 
     access_token = token_data.get("access_token")
     if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No access token received from OIDC provider"
-        )
+        raise HTTPException(status_code=401, detail="No access token received from OIDC provider")
 
-    # Step 2: Fetch user info
     try:
         userinfo = _get_userinfo(issuer=oidc_issuer, access_token=access_token)
     except Exception:
-        # Sanitised error: do not leak raw exception / provider details
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to fetch user information from OIDC provider"
-        )
+        raise HTTPException(status_code=401, detail="Failed to fetch user information from OIDC provider")
 
-    # Step 3: Extract email (standard OIDC claim)
     email = userinfo.get("email")
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="OIDC provider did not return an email address"
-        )
+        raise HTTPException(status_code=401, detail="OIDC provider did not return an email address")
 
     full_name = userinfo.get("name") or userinfo.get("preferred_username")
-
-    # Step 4: Provision user
     sso_id = str(userinfo.get("sub", ""))
-    user = _provision_user(
-        db, email=email, full_name=full_name,
-        sso_provider="oidc", sso_id=sso_id,
-    )
 
-    # Step 5: Return JWT token
+    from kubetix_api.models import provision_user
+    user = provision_user(db, email=email, full_name=full_name, sso_provider="oidc", sso_id=sso_id)
+
     access_token_jwt = create_access_token(
         data={"sub": user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
-    return {
-        "access_token": access_token_jwt,
-        "token_type": "bearer",
-        "user": user,
-    }
+    return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
 
 @app.get("/auth/oidc/login")
 async def oidc_login():
-    """
-    Initiate OIDC login with configured provider.
-    Redirects to the OIDC provider's authorization endpoint.
-
-    Security (audit #60): includes PKCE code_challenge and a CSRF state token
-    in the auth URL.  The client must send both ``state`` (= auth_code_id) and
-    ``code_verifier`` back to the callback endpoint.
-    """
-    oidc_issuer = os.environ.get("OIDC_ISSUER", "")
-    oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
-    oidc_redirect_uri = os.environ.get(
-        "OIDC_REDIRECT_URI",
-        "http://localhost:8000/auth/oidc/callback"
-    )
-
-    if not oidc_issuer or not oidc_client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OIDC not configured. Set OIDC_ISSUER and OIDC_CLIENT_ID."
-        )
-
+    """Initiate OIDC login with configured provider."""
     import urllib.parse
 
-    # --- PKCE + CSRF state (audit #60) ---
-    code_verifier, code_challenge = _generate_pkce_params()
-    csrf_state = secrets.token_urlsafe(32)
+    oidc_issuer = os.environ.get("OIDC_ISSUER", "")
+    oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
+    oidc_redirect_uri = os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback")
 
-    # Store challenge + state in DB for later verification on callback
+    if not oidc_issuer or not oidc_client_id:
+        raise HTTPException(status_code=400, detail="OIDC not configured. Set OIDC_ISSUER and OIDC_CLIENT_ID.")
+
+    code_verifier, code_challenge = _generate_pkce_params()
+    csrf_state = __import__("secrets").token_urlsafe(32)
+
+    from kubetix_api.database import SessionLocal
     db = SessionLocal()
     try:
         auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
     finally:
         db.close()
 
-    params: dict = {
+    params = {
         "client_id": oidc_client_id,
         "redirect_uri": oidc_redirect_uri,
         "response_type": "code",
         "scope": "openid profile email",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "state": auth_code_id,  # serves as both CSRF state and DB lookup key
+        "state": auth_code_id,
     }
 
     auth_url = f"{oidc_issuer.rstrip('/')}/authorize?{urllib.parse.urlencode(params)}"
@@ -1462,12 +634,8 @@ async def oidc_login():
 
 
 @app.get("/auth/oidc/userinfo")
-async def oidc_userinfo(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get current user info with OIDC attributes.
-    """
+async def oidc_userinfo(current_user: User = Depends(get_current_user)):
+    """Get current user info with OIDC attributes."""
     return {
         "id": current_user.id,
         "email": current_user.email,
@@ -1476,6 +644,10 @@ async def oidc_userinfo(
         "is_admin": current_user.is_admin,
     }
 
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
 
 @app.get("/health")
 async def health_check():
