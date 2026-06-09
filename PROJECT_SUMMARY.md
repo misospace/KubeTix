@@ -10,9 +10,9 @@
 - ✅ Instant revocation
 - ✅ Namespace & role control
 
-### Test Suite (29 tests)
+### Test Suite (30 tests)
 - ✅ 14 Unit tests (encryption, database, lifecycle)
-- ✅ 15 Integration tests (CLI, edge cases, security)
+- ✅ 16 Integration tests (CLI, edge cases, security)
 - ✅ All tests passing
 
 ### CI/CD Pipeline
@@ -107,12 +107,12 @@ Unit Tests:
    - Expiry: 1 test
 
 Integration Tests:
-✅ Ran 15 tests in 1.487s
+✅ Ran 16 tests in 1.487s
    - CLI Commands: 6 tests
    - Edge Cases: 6 tests
    - Security: 3 tests
 
-Total: 29 tests passed ✅
+Total: 30 tests passed ✅
 ```
 
 ## 🔒 Security Features
@@ -126,22 +126,21 @@ Total: 29 tests passed ✅
 
 ## 🌐 Live Repository
 
-**GitHub**: https://github.com/joryirving/KubeTix
+**GitHub**: https://github.com/misospace/KubeTix
 
 ## 📝 Next Steps
 
-1. **Backend API** - Build a Python FastAPI backend for the web UI
-2. **Cloud Integrations** - Add EKS/GKE/AKS support
-3. **Team Features** - Multi-user support with SSO
-4. **Slack/Teams Bot** - Grant access via chat commands
-5. **Deployment** - Deploy to production (Vercel for web, cloud for API)
+1. **Cloud Integrations** - Add EKS/GKE/AKS support
+2. **Slack/Teams Bot** - Grant access via chat commands
+3. **Deployment** - Deploy to production (Vercel for web, cloud for API)
+4. **OIDC Integration** - Complete self-hosted OIDC setup (Authentik, Keycloak, Okta)
 
 ## 🎯 What's Next?
 
 Want to:
-- Build the backend API?
 - Add cloud provider integrations?
-- Deploy the web UI?
-- Add team features?
+- Build a Slack/Teams bot?
+- Deploy to production?
+- Complete OIDC integration?
 
 Let me know what you want to tackle next! 🍲
