@@ -94,14 +94,14 @@ class TestCreateTeam:
         response = client.post(
             "/teams",
             json={
-                "name": "Test Team",
+                "name": "test-team",
                 "description": "A test team"
             },
             headers=auth_headers
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["name"] == "Test Team"
+        assert data["name"] == "test-team"
         assert data["description"] == "A test team"
         assert "id" in data
         assert "created_at" in data
@@ -111,13 +111,13 @@ class TestCreateTeam:
         response = client.post(
             "/teams",
             json={
-                "name": "Minimal Team"
+                "name": "minimal-team"
             },
             headers=auth_headers
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["name"] == "Minimal Team"
+        assert data["name"] == "minimal-team"
     
     def test_create_team_without_name(self, client, auth_headers):
         """Test creating a team without name fails."""
@@ -130,12 +130,23 @@ class TestCreateTeam:
         )
         assert response.status_code == 422
     
+    def test_create_team_invalid_name(self, client, auth_headers):
+        """Test creating a team with invalid name (spaces/uppercase) fails."""
+        response = client.post(
+            "/teams",
+            json={
+                "name": "Invalid Team Name"
+            },
+            headers=auth_headers
+        )
+        assert response.status_code == 422
+    
     def test_create_team_unauthorized(self, client):
         """Test creating a team without authentication."""
         response = client.post(
             "/teams",
             json={
-                "name": "Test Team"
+                "name": "test-team"
             }
         )
         assert response.status_code == 401
@@ -158,7 +169,7 @@ class TestListTeams:
         # Create team
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -178,7 +189,7 @@ class TestListTeams:
         assert response.status_code == 200
         teams = response.json()
         assert len(teams) == 1
-        assert teams[0]["name"] == "Test Team"
+        assert teams[0]["name"] == "test-team"
     
     def test_list_teams_not_member(self, client, db_session, auth_headers):
         """Test that teams where user is not a member are not listed."""
@@ -186,13 +197,13 @@ class TestListTeams:
         other_user = User(
             id=secrets.token_urlsafe(16),
             email="other@example.com",
-            hashed_password=get_password_hash("password")
+            hashed_password=get_password_hash("testpassword123")
         )
         db_session.add(other_user)
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Other Team",
+            name="other-team",
             created_by=other_user.id
         )
         db_session.add(team)
@@ -213,7 +224,7 @@ class TestGetTeam:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -229,20 +240,20 @@ class TestGetTeam:
         
         response = client.get(f"/teams/{team.id}", headers=auth_headers)
         assert response.status_code == 200
-        assert response.json()["name"] == "Test Team"
+        assert response.json()["name"] == "test-team"
     
     def test_get_team_not_member(self, client, db_session, auth_headers):
         """Test getting a team the user is not a member of."""
         other_user = User(
             id=secrets.token_urlsafe(16),
             email="other@example.com",
-            hashed_password=get_password_hash("password")
+            hashed_password=get_password_hash("testpassword123")
         )
         db_session.add(other_user)
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Private Team",
+            name="private-team",
             created_by=other_user.id
         )
         db_session.add(team)
@@ -267,7 +278,7 @@ class TestAddTeamMember:
         # Create team
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -285,7 +296,7 @@ class TestAddTeamMember:
         new_user = User(
             id=secrets.token_urlsafe(16),
             email="newuser@example.com",
-            hashed_password=get_password_hash("password")
+            hashed_password=get_password_hash("testpassword123")
         )
         db_session.add(new_user)
         db_session.commit()
@@ -308,7 +319,7 @@ class TestAddTeamMember:
         # Create team
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -340,7 +351,7 @@ class TestAddTeamMember:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -370,7 +381,7 @@ class TestAddTeamMember:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -406,7 +417,7 @@ class TestRemoveTeamMember:
         # Create team
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -424,7 +435,7 @@ class TestRemoveTeamMember:
         member_user = User(
             id=secrets.token_urlsafe(16),
             email="member@example.com",
-            hashed_password=get_password_hash("password")
+            hashed_password=get_password_hash("testpassword123")
         )
         db_session.add(member_user)
         
@@ -451,7 +462,7 @@ class TestRemoveTeamMember:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -478,7 +489,7 @@ class TestRemoveTeamMember:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -508,7 +519,7 @@ class TestListTeamMembers:
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Test Team",
+            name="test-team",
             created_by=user.id
         )
         db_session.add(team)
@@ -533,13 +544,13 @@ class TestListTeamMembers:
         other_user = User(
             id=secrets.token_urlsafe(16),
             email="other@example.com",
-            hashed_password=get_password_hash("password")
+            hashed_password=get_password_hash("testpassword123")
         )
         db_session.add(other_user)
         
         team = Team(
             id=secrets.token_urlsafe(16),
-            name="Private Team",
+            name="private-team",
             created_by=other_user.id
         )
         db_session.add(team)
