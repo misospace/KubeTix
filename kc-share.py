@@ -44,8 +44,7 @@ def init_db():
         )
     """)
 
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS grants (
             id TEXT PRIMARY KEY,
             cluster_name TEXT NOT NULL,
@@ -70,19 +69,16 @@ def init_db():
         columns = [col[1] for col in cursor.fetchall()]
 
         if "encrypted_kubeconfig" not in columns:
-            cursor.execute(
-                """
+            cursor.execute("""
                 ALTER TABLE grants ADD COLUMN encrypted_kubeconfig TEXT
-            """
-            )
+            """)
 
         # Ensure audit_log has created_at column (API uses created_at)
         cursor.execute("PRAGMA table_info(audit_log)")
         audit_columns = [col[1] for col in cursor.fetchall()]
         if "created_at" not in audit_columns and "timestamp" in audit_columns:
             # Rename timestamp to created_at via migration
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE audit_log_new (
                     id TEXT PRIMARY KEY,
                     grant_id TEXT NOT NULL,
@@ -90,8 +86,7 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     details TEXT
                 )
-            """
-            )
+            """)
             cursor.execute(
                 "INSERT INTO audit_log_new (id, grant_id, action, created_at, details) "
                 "SELECT id, grant_id, action, timestamp, details FROM audit_log"
@@ -122,8 +117,7 @@ def init_db():
         cursor.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
         conn.commit()
 
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id TEXT PRIMARY KEY,
             grant_id TEXT NOT NULL,
@@ -209,8 +203,14 @@ def create_grant(
                             encrypted_kubeconfig)
         VALUES (?, ?, ?, ?, ?, ?)
     """,
-        (grant_id, cluster_name, namespace, role, expires_at.isoformat(),
-         encrypted_kubeconfig),
+        (
+            grant_id,
+            cluster_name,
+            namespace,
+            role,
+            expires_at.isoformat(),
+            encrypted_kubeconfig,
+        ),
     )
 
     cursor.execute(
