@@ -290,7 +290,7 @@ async def add_team_member_endpoint(
     return add_team_member(team_id, member_data, current_user, db)
 
 
-@app.delete("/teams/{team_id}/members/{user_id}")
+@app.delete("/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_team_member_endpoint(
     team_id: str,
     user_id: str,

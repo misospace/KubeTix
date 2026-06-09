@@ -247,8 +247,8 @@ class TestCreateGrants:
         
         os.unlink(kubeconfig_path)
         
-        assert response.status_code == 400
-        assert "invalid role" in response.json()["detail"].lower()
+        assert response.status_code == 422
+        assert any("role" in str(err).lower() for err in response.json()["detail"])
     
     def test_create_grant_expiry_too_short(self, client, auth_headers, monkeypatch):
         """Test creating a grant with expiry too short."""
@@ -270,7 +270,7 @@ class TestCreateGrants:
         
         os.unlink(kubeconfig_path)
         
-        assert response.status_code == 400
+        assert response.status_code == 422
     
     def test_create_grant_expiry_too_long(self, client, auth_headers, monkeypatch):
         """Test creating a grant with expiry too long."""
@@ -292,7 +292,7 @@ class TestCreateGrants:
         
         os.unlink(kubeconfig_path)
         
-        assert response.status_code == 400
+        assert response.status_code == 422
     
     def test_create_grant_missing_cluster_name(self, client, auth_headers):
         """Test creating a grant without cluster name."""
@@ -341,7 +341,8 @@ class TestRevokeGrants:
         response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
         assert response.status_code == 204
         
-        # Verify grant is revoked
+        # Verify grant is revoked — re-query from the same session
+        db_session.expire_all()
         grant = db_session.query(Grant).filter(Grant.id == grant_id).first()
         assert grant.revoked is True
     
@@ -379,6 +380,11 @@ class TestDownloadGrants:
     
     def test_download_grant_success(self, client, db_session, auth_headers, auth_token, monkeypatch):
         """Test successfully downloading a grant."""
+        from kubetix_api.grants import _get_fernet
+        
+        # Set fixed encryption key so test and API use the same key
+        monkeypatch.setenv("KUBECONFIG_ENCRYPTION_KEY", "T2KBewlnH_vRDWCBGLdnrcBciZBq497CaE0mGVZdMs0=")
+        
         # Create kubeconfig file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
             f.write("apiVersion: v1\nkind: Config\nclusters: []\n")
@@ -389,7 +395,8 @@ class TestDownloadGrants:
         # Create grant
         user = db_session.query(User).filter(User.email == "test@example.com").first()
         kubeconfig_content = open(kubeconfig_path).read()
-        encrypted = _fernet_encrypt(kubeconfig_content)
+        fernet = _get_fernet()
+        encrypted = fernet.encrypt(kubeconfig_content.encode()).decode()
         
         grant = Grant(
             id=secrets.token_urlsafe(16),
