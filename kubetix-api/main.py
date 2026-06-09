@@ -7,6 +7,7 @@ import subprocess
 import sys
 import secrets
 import sqlite3
+import atexit
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -17,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, String, Boolean, Text, DateTime, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import create_engine, event, Column, String, Boolean, Text, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy import func
@@ -53,7 +54,18 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 # Database
 DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///./kubetix.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
+)
+
+# Enable foreign key enforcement for SQLite (disabled by default)
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
