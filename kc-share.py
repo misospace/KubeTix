@@ -31,11 +31,21 @@ ENCRYPTION_KEY = os.environ.get("KC_SHARE_KEY") or None
 def init_db():
     """Initialize the database"""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Track schema version for migrations
+    SCHEMA_VERSION = 2
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    # Create schema_version table
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY
+        )
+    """)
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS grants (
             id TEXT PRIMARY KEY,
             cluster_name TEXT NOT NULL,
@@ -44,16 +54,81 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP NOT NULL,
             revoked BOOLEAN DEFAULT 0,
-            metadata TEXT
+            metadata TEXT,
+            encrypted_kubeconfig TEXT
         )
     """)
 
-    cursor.execute("""
+    # Check if we need to add encrypted_kubeconfig column (migration from v1)
+    cursor.execute("SELECT version FROM schema_version LIMIT 1")
+    row = cursor.fetchone()
+    current_version = row[0] if row else 0
+
+    if current_version < SCHEMA_VERSION:
+        # Check if encrypted_kubeconfig column already exists (partial migration)
+        cursor.execute("PRAGMA table_info(grants)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        if "encrypted_kubeconfig" not in columns:
+            cursor.execute(
+                """
+                ALTER TABLE grants ADD COLUMN encrypted_kubeconfig TEXT
+            """
+            )
+
+        # Ensure audit_log has created_at column (API uses created_at)
+        cursor.execute("PRAGMA table_info(audit_log)")
+        audit_columns = [col[1] for col in cursor.fetchall()]
+        if "created_at" not in audit_columns and "timestamp" in audit_columns:
+            # Rename timestamp to created_at via migration
+            cursor.execute(
+                """
+                CREATE TABLE audit_log_new (
+                    id TEXT PRIMARY KEY,
+                    grant_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    details TEXT
+                )
+            """
+            )
+            cursor.execute(
+                "INSERT INTO audit_log_new (id, grant_id, action, created_at, details) "
+                "SELECT id, grant_id, action, timestamp, details FROM audit_log"
+            )
+            cursor.execute("DROP TABLE audit_log")
+            cursor.execute("ALTER TABLE audit_log_new RENAME TO audit_log")
+
+        # Migrate existing grants: move encrypted kubeconfig from metadata to new column
+        cursor.execute("SELECT id, metadata FROM grants WHERE metadata IS NOT NULL")
+        for row in cursor.fetchall():
+            grant_id, metadata_str = row
+            if metadata_str:
+                try:
+                    metadata = json.loads(metadata_str)
+                    if "kubeconfig_encrypted" in metadata:
+                        # Decrypt and re-encrypt with current key (key may have changed)
+                        encrypted_kubeconfig = encrypt_data(
+                            decrypt_data(metadata["kubeconfig_encrypted"])
+                        )
+                        cursor.execute(
+                            "UPDATE grants SET encrypted_kubeconfig = ? WHERE id = ?",
+                            (encrypted_kubeconfig, grant_id),
+                        )
+                except (json.JSONDecodeError, Exception):
+                    pass  # Skip malformed metadata
+
+        cursor.execute("DELETE FROM schema_version")
+        cursor.execute("INSERT INTO schema_version VALUES (?)", (SCHEMA_VERSION,))
+        conn.commit()
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS audit_log (
             id TEXT PRIMARY KEY,
             grant_id TEXT NOT NULL,
             action TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             details TEXT
         )
     """)
@@ -125,23 +200,17 @@ def create_grant(
     with open(kubeconfig_path) as f:
         kubeconfig = f.read()
 
-    # Encrypt and store
+    # Encrypt and store directly (unified with API schema)
     encrypted_kubeconfig = encrypt_data(kubeconfig)
-    metadata = json.dumps(
-        {
-            "cluster": cluster_name,
-            "namespace": namespace,
-            "role": role,
-            "kubeconfig_encrypted": encrypted_kubeconfig,
-        }
-    )
 
     cursor.execute(
         """
-        INSERT INTO grants (id, cluster_name, namespace, role, expires_at, metadata)
+        INSERT INTO grants (id, cluster_name, namespace, role, expires_at,
+                            encrypted_kubeconfig)
         VALUES (?, ?, ?, ?, ?, ?)
     """,
-        (grant_id, cluster_name, namespace, role, expires_at.isoformat(), metadata),
+        (grant_id, cluster_name, namespace, role, expires_at.isoformat(),
+         encrypted_kubeconfig),
     )
 
     cursor.execute(
@@ -182,7 +251,7 @@ def get_grant(grant_id: str) -> Optional[dict]:
         "created_at": row[4],
         "expires_at": row[5],
         "revoked": bool(row[6]),
-        "metadata": json.loads(row[7]),
+        "encrypted_kubeconfig": row[7] if len(row) > 7 and row[7] else None,
     }
 
 
@@ -255,7 +324,10 @@ def download_context(grant_id: str) -> str:
     ):
         raise ValueError(f"Grant has expired: {grant_id}")
 
-    return decrypt_data(grant["metadata"]["kubeconfig_encrypted"])
+    encrypted_kc = grant.get("encrypted_kubeconfig")
+    if not encrypted_kc:
+        raise ValueError("No encrypted kubeconfig found for this grant")
+    return decrypt_data(encrypted_kc)
 
 
 def main():
