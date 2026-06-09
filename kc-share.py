@@ -95,7 +95,9 @@ def init_db():
             cursor.execute("ALTER TABLE audit_log_new RENAME TO audit_log")
 
         # Migrate existing grants: move encrypted kubeconfig from metadata to new column
-        cursor.execute("SELECT id, metadata FROM grants WHERE metadata IS NOT NULL AND encrypted_kubeconfig IS NULL")
+        cursor.execute(
+            "SELECT id, metadata FROM grants WHERE metadata IS NOT NULL AND encrypted_kubeconfig IS NULL"
+        )
         for row in cursor.fetchall():
             grant_id, metadata_str = row
             if metadata_str:
