@@ -241,17 +241,36 @@ def get_grant(grant_id: str) -> Optional[dict]:
     row = cursor.fetchone()
 
     if not row:
+        conn.close()
         return None
 
+    # Determine column layout dynamically to support both old and new schemas
+    cursor.execute("PRAGMA table_info(grants)")
+    columns = {col[1]: idx for idx, col in enumerate(cursor.fetchall())}
+    conn.close()
+
+    encrypted_kc = None
+    if "encrypted_kubeconfig" in columns:
+        encrypted_kc = row[columns["encrypted_kubeconfig"]] or None
+    elif "metadata" in columns:
+        # Legacy: try to decrypt kubeconfig from metadata
+        meta_str = row[columns.get("metadata", 7)] or ""
+        try:
+            meta = json.loads(meta_str)
+            if "kubeconfig_encrypted" in meta:
+                encrypted_kc = meta["kubeconfig_encrypted"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
     return {
-        "id": row[0],
-        "cluster_name": row[1],
-        "namespace": row[2],
-        "role": row[3],
-        "created_at": row[4],
-        "expires_at": row[5],
-        "revoked": bool(row[6]),
-        "encrypted_kubeconfig": row[7] if len(row) > 7 and row[7] else None,
+        "id": row[columns.get("id", 0)],
+        "cluster_name": row[columns.get("cluster_name", 1)],
+        "namespace": row[columns.get("namespace", 2)],
+        "role": row[columns.get("role", 3)],
+        "created_at": row[columns.get("created_at", 4)],
+        "expires_at": row[columns.get("expires_at", 5)],
+        "revoked": bool(row[columns.get("revoked", 6)]),
+        "encrypted_kubeconfig": encrypted_kc,
     }
 
 
