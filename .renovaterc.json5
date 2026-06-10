@@ -1,4 +1,20 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["github>misospace/renovate-config"],
+  packageRules: [
+    {
+      description: "Auto-merge Python minor and patch updates",
+      matchManagers: ["pip_requirements"],
+      automerge: true,
+      automergeType: "branch",
+      matchUpdateTypes: ["minor", "patch"],
+      minimumReleaseAge: "3 days",
+    },
+    {
+      description: "Require review for Python major updates",
+      matchManagers: ["pip_requirements"],
+      matchUpdateTypes: ["major"],
+      automerge: false,
+    },
+  ],
 }
