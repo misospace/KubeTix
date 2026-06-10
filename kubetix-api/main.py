@@ -29,8 +29,20 @@ try:
     from slowapi.errors import RateLimitExceeded
 
     HAS_RATE_LIMITING = True
+    limiter = Limiter(
+        key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
+    )
 except ImportError:
     HAS_RATE_LIMITING = False
+
+    # No-op limiter so decorators always work regardless of rate limiting config.
+    class _NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+
+    limiter = _NoOpLimiter()
 
 # ---------------------------------------------------------------------------
 # CORS middleware
@@ -51,9 +63,6 @@ app = FastAPI(
 )
 
 if HAS_RATE_LIMITING:
-    limiter = Limiter(
-        key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
-    )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     # Register slowapi startup handler (compatible with all FastAPI versions)
@@ -158,7 +167,7 @@ from kubetix_api.schemas import (  # noqa: E402
 
 
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("5 per hour") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per hour")
 async def register_user(
     request: Request,
     user_data: UserCreate,
@@ -186,7 +195,7 @@ async def register_user(
 
 
 @app.post("/login", response_model=Token)
-@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per minute")
 async def login(
     request: Request,
     user_data: UserLogin,
@@ -240,7 +249,7 @@ from kubetix_api.grants import (  # noqa: E402
 
 
 @app.get("/grants", response_model=List[GrantResponse])
-@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per minute")
 async def list_grants(
     request: Request, current_user: User = Depends(get_current_user), db=Depends(get_db)
 ):
@@ -248,7 +257,7 @@ async def list_grants(
 
 
 @app.post("/grants", response_model=GrantResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("10 per hour") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per hour")
 async def create_grant_endpoint(
     request: Request,
     grant_data: GrantCreate,
@@ -259,7 +268,7 @@ async def create_grant_endpoint(
 
 
 @app.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
-@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per minute")
 async def download_grant(
     request: Request,
     grant_id: str,
@@ -270,7 +279,7 @@ async def download_grant(
 
 
 @app.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
-@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per minute")
 async def revoke_grant_endpoint(
     request: Request,
     grant_id: str,
@@ -375,7 +384,7 @@ from kubetix_api.oidc import (  # noqa: E402
 
 
 @app.post("/auth/sso/callback")
-@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per minute")
 async def sso_callback(
     request: Request,
     provider: str,
@@ -629,7 +638,7 @@ async def sso_login(provider: str):
 
 
 @app.post("/auth/oidc/callback")
-@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per minute")
 async def oidc_callback(
     request: Request,
     code: str,
