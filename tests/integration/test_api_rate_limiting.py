@@ -1,6 +1,10 @@
 """
 Rate limiting tests for KubeTix API
 Tests rate limiting on authentication and API endpoints
+
+Note: Rate limiting is disabled in TESTING mode (HAS_RATE_LIMITING=False).
+These tests verify that without rate limiting, requests succeed normally.
+When rate limiting is implemented, these tests should be updated accordingly.
 """
 
 import pytest
@@ -28,7 +32,11 @@ class TestAuthenticationRateLimiting:
     """Tests for authentication rate limiting."""
     
     def test_failed_login_rate_limit(self, client, db_session, test_user):
-        """Test that repeated failed logins are rate limited."""
+        """Test that repeated failed logins are not blocked without rate limiting.
+        
+        When rate limiting is disabled (TESTING mode), all attempts should return 401.
+        When rate limiting is implemented, last attempts should return 429.
+        """
         # Attempt multiple failed logins
         attempts = 20
         results = []
@@ -43,16 +51,10 @@ class TestAuthenticationRateLimiting:
             )
             results.append(response.status_code)
         
-        # After rate limiting, should get 429
-        # Note: Rate limiting not yet implemented
-        # This test documents expected behavior
-        
         # Without rate limiting, all should be 401
-        rate_limited = results[-5:]  # Last 5 attempts
-        print(f"Last 5 login attempt results: {rate_limited}")
-        
-        # This test will pass currently (no rate limiting)
-        # After implementation, last attempts should return 429
+        assert all(s == 401 for s in results), (
+            f"Expected all 401 without rate limiting, got: {results}"
+        )
     
     def test_login_success_not_rate_limited(self, client, db_session, test_user):
         """Test that successful logins are not rate limited."""
@@ -69,11 +71,15 @@ class TestAuthenticationRateLimiting:
             results.append(response.status_code)
         
         # All should succeed
-        assert all(s == 200 for s in results)
+        assert all(s == 200 for s in results), (
+            f"Expected all 200, got: {results}"
+        )
     
     def test_registration_rate_limit(self, client):
-        """Test that registration is rate limited."""
-        # Attempt multiple registrations
+        """Test that registration requests succeed without rate limiting.
+        
+        When rate limiting is disabled (TESTING mode), registrations should succeed.
+        """
         results = []
         
         for i in range(15):
@@ -86,16 +92,20 @@ class TestAuthenticationRateLimiting:
             )
             results.append(response.status_code)
         
-        # After rate limiting, should get 429
-        # Currently should all succeed (no rate limiting)
-        print(f"Registration attempt results: {results}")
+        # Without rate limiting, registrations should succeed (200 or 409 if duplicate)
+        assert all(s in [200, 201, 409] for s in results), (
+            f"Expected 200/409 without rate limiting, got: {results}"
+        )
 
 
 class TestAPIRateLimiting:
     """Tests for API endpoint rate limiting."""
     
     def test_grant_list_rate_limit(self, client, db_session, test_user):
-        """Test rate limiting on grant listing."""
+        """Test rate limiting on grant listing.
+        
+        Without rate limiting, all requests should succeed.
+        """
         # Login first
         response = client.post(
             "/login",
@@ -113,17 +123,16 @@ class TestAPIRateLimiting:
             response = client.get("/grants", headers=headers)
             results.append(response.status_code)
         
-        # Should have some 200s, possibly 429s after rate limiting
-        success_count = results.count(200)
-        rate_limited = results.count(429)
-        
-        print(f"Success: {success_count}, Rate limited: {rate_limited}")
-        
         # Without rate limiting, all should be 200
-        assert success_count + rate_limited == 100
+        assert all(s == 200 for s in results), (
+            f"Expected all 200 without rate limiting, got: {results[:10]}..."
+        )
     
     def test_grant_create_rate_limit(self, client, db_session, test_user):
-        """Test rate limiting on grant creation."""
+        """Test rate limiting on grant creation.
+        
+        Without rate limiting, requests should not be blocked (may fail validation).
+        """
         # Login first
         response = client.post(
             "/login",
@@ -134,9 +143,6 @@ class TestAPIRateLimiting:
         )
         token = response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
-        
-        # Note: Without actual kubeconfig, these will fail validation
-        # This test documents expected behavior
         
         results = []
         for i in range(50):
@@ -150,14 +156,20 @@ class TestAPIRateLimiting:
             )
             results.append(response.status_code)
         
-        print(f"Grant create results: {results[:10]}...")
+        # Without rate limiting, no 429s should appear
+        assert 429 not in results, (
+            f"Got 429 without rate limiting enabled: {results}"
+        )
 
 
 class TestRateLimitHeaders:
     """Tests for rate limit headers."""
     
     def test_rate_limit_headers_present(self, client, db_session, test_user):
-        """Test that rate limit headers are present in responses."""
+        """Test that rate limit headers behavior is documented.
+        
+        Without rate limiting, headers won't be present. This is expected.
+        """
         # Login
         response = client.post(
             "/login",
@@ -168,12 +180,6 @@ class TestRateLimitHeaders:
         )
         
         # Check for rate limit headers
-        # Common headers:
-        # - X-RateLimit-Limit
-        # - X-RateLimit-Remaining
-        # - X-RateLimit-Reset
-        # - Retry-After
-        
         headers = response.headers
         has_rate_limit = any(
             h in headers for h in [
@@ -183,18 +189,17 @@ class TestRateLimitHeaders:
             ]
         )
         
-        print(f"Rate limit headers present: {has_rate_limit}")
-        print(f"Response headers: {dict(headers)}")
-        
         # Without rate limiting, headers won't be present
-        # This test documents expected behavior
+        assert not has_rate_limit, (
+            "Rate limit headers should not be present when rate limiting is disabled"
+        )
 
 
 class TestRateLimitConfiguration:
     """Tests for rate limit configuration."""
     
     def test_different_endpoints_different_limits(self, client, db_session, test_user):
-        """Test that different endpoints have different rate limits."""
+        """Test that different endpoints are accessible without rate limiting."""
         # Login
         response = client.post(
             "/login",
@@ -215,11 +220,16 @@ class TestRateLimitConfiguration:
         
         for endpoint in endpoints:
             response = client.get(endpoint, headers=headers)
-            # Just verify endpoint works
-            assert response.status_code in [200, 401, 403]
+            # Just verify endpoint works without being rate limited
+            assert response.status_code in [200, 401, 403], (
+                f"Endpoint {endpoint} returned unexpected status: {response.status_code}"
+            )
     
     def test_ip_based_rate_limiting(self, client, db_session, test_user):
-        """Test that rate limiting is IP-based."""
+        """Test that rate limiting is IP-based.
+        
+        Without rate limiting, login should return 401 for wrong password.
+        """
         # Make request from same IP
         response = client.post(
             "/login",
@@ -229,9 +239,9 @@ class TestRateLimitConfiguration:
             }
         )
         
-        # Rate limit should be based on IP
-        # This test documents expected behavior
-        print(f"Login response status: {response.status_code}")
+        assert response.status_code == 401, (
+            f"Expected 401 for wrong password without rate limiting, got: {response.status_code}"
+        )
 
 
 # Documentation of expected rate limits

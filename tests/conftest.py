@@ -80,15 +80,18 @@ import os
 def db(db_session):
     """Alias for db_session (some test files use 'db' instead of 'db_session')."""
     return db_session
+@pytest.fixture(scope="function")
+def test_user(db):
+    """Create a regular (non-admin) test user."""
+    user = User(
+        id="test-user-123",
+        email="test@example.com",
+        hashed_password=get_password_hash("testpassword123"),
+    )
+    db.add(user)
+    db.commit()
+    return user
 
-
-# Skip rate-limiting tests when TESTING mode is enabled (rate limiting is disabled)
-def pytest_collection_modifyitems(config, items):
-    if os.environ.get("TESTING"):
-        skip_rate_limit = pytest.mark.skip(reason="rate limiting disabled in TESTING mode")
-        for item in items:
-            if "rate_limit" in item.nodeid or "RateLimit" in item.name:
-                item.add_marker(skip_rate_limit)
 
 
 # Additional fixtures needed by audit log and download grant tests
