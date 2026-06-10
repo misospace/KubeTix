@@ -59,7 +59,7 @@ def client(_setup_tables):
     if hasattr(app.state, "limiter") and app.state.limiter is not None:
         if hasattr(app.state.limiter, "storage"):
             try:
-                app.state.limiter.storage.clear()
+                app.state.limiter._storage.clear()
             except Exception:
                 pass
 
@@ -150,9 +150,33 @@ def other_headers(other_token):
     return {"Authorization": f"Bearer {other_token}"}
 
 
+def _reset_rate_limiter():
+    """Reset slowapi rate limiter storage to prevent cross-test leaks.
+
+    The `limits` MemoryStorage uses multiple dicts (storage, expirations, events, locks).
+    Calling `.clear(key)` only removes one key; we need to clear all entries.
+    """
+    if hasattr(app.state, "limiter") and app.state.limiter is not None:
+        st = getattr(app.state.limiter, "_storage", None)
+        if st is not None:
+            try:
+                # Clear all internal storage dicts (limits.MemoryStorage internals)
+                st.storage.clear()
+                st.expirations.clear()
+                st.events.clear()
+                if hasattr(st, "locks"):
+                    st.locks.clear()
+            except Exception:
+                pass
+
+
 @pytest.fixture(scope="function")
 def auth_token(client, db_session):
-    """Create user and return auth token."""
+    """Create user and return auth token.
+
+    Resets the rate limiter before login to prevent cross-test rate limit leaks.
+    Retries once if rate-limited on first attempt.
+    """
     # Create user
     user = User(
         id="test-user-123",
@@ -162,7 +186,8 @@ def auth_token(client, db_session):
     db_session.add(user)
     db_session.commit()
 
-    # Login to get token
+    # Login to get token — reset rate limiter first, retry once if rate-limited
+    _reset_rate_limiter()
     response = client.post(
         "/login",
         json={
@@ -170,7 +195,19 @@ def auth_token(client, db_session):
             "password": "testpassword123"
         }
     )
-    return response.json()["access_token"]
+    data = response.json()
+    if response.status_code == 429 or "access_token" not in data:
+        # Rate-limited; reset and retry once
+        _reset_rate_limiter()
+        response = client.post(
+            "/login",
+            json={
+                "email": "test@example.com",
+                "password": "testpassword123"
+            }
+        )
+        data = response.json()
+    return data["access_token"]
 
 
 @pytest.fixture(scope="function")
