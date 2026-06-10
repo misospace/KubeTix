@@ -298,6 +298,8 @@ async def remove_team_member_endpoint(
 ):
     remove_team_member(team_id, user_id, current_user, db)
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @app.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
 async def list_team_members_endpoint(

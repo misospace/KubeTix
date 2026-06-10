@@ -23,6 +23,14 @@ os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "kubetix-api"))
 from main import app, Base, get_db, User, Grant, get_password_hash, create_access_token
+from cryptography.fernet import Fernet
+
+# Fernet encryption helper for creating test encrypted kubeconfig grants
+def _fernet_encrypt(data: str) -> str:
+    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
+    return Fernet(key.encode()).encrypt(data.encode()).decode()
 
 # Test database (in-memory SQLite)
 _TEST_DB_URL = f"sqlite:///:memory:?dbname=download_grant_{secrets.token_hex(4)}"

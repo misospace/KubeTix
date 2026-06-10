@@ -21,6 +21,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
 
 from main import app, Base, get_db, User, Grant, get_password_hash
+from cryptography.fernet import Fernet
+
+# Fernet encryption helper for creating test encrypted kubeconfig grants
+def _fernet_encrypt(data: str) -> str:
+    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
+    return Fernet(key.encode()).encrypt(data.encode()).decode()
 
 
 # Test database (in-memory SQLite)

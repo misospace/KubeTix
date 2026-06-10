@@ -19,6 +19,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
 from main import app, Base, get_db, User, get_password_hash
 from _shared_db import engine, TestingSessionLocal, override_get_db
 
+# Fernet encryption helper for tests that need to create encrypted kubeconfig grants
+from cryptography.fernet import Fernet
+
+
+def _fernet_encrypt(data: str) -> str:
+    """Encrypt data using Fernet symmetric encryption (key from env)."""
+    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set for _fernet_encrypt")
+    return Fernet(key.encode()).encrypt(data.encode()).decode()
+
+
 # Apply the dependency override once for all tests
 app.dependency_overrides[get_db] = override_get_db
 
