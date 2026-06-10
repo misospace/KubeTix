@@ -56,7 +56,11 @@ if HAS_RATE_LIMITING:
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    app.add_event_handler("startup", limiter.slowapi_startup)
+    # Register slowapi startup handler (compatible with all FastAPI versions)
+    if hasattr(app, "add_event_handler"):
+        app.add_event_handler("startup", limiter.slowapi_startup)
+    else:
+        app.on_event("startup")(limiter.slowapi_startup)
 
 app.add_middleware(
     CORSMiddleware,
@@ -238,8 +242,7 @@ from kubetix_api.grants import (  # noqa: E402
 @app.get("/grants", response_model=List[GrantResponse])
 @limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
 async def list_grants(
-    request: Request,
-    current_user: User = Depends(get_current_user), db=Depends(get_db)
+    request: Request, current_user: User = Depends(get_current_user), db=Depends(get_db)
 ):
     return list_grants_for_user(current_user, db)
 
