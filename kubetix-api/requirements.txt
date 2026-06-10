@@ -5,5 +5,5 @@ python-jose[cryptography]==3.5.0
 bcrypt==5.0.0
 python-multipart==0.0.32
 pydantic==2.13.4
-cryptography==48.0.0
+cryptography==48.0.1
 httpx==0.28.1
