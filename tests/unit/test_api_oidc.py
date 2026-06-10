@@ -4,50 +4,12 @@ Tests OIDC authentication flows
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-from _shared_db import engine, TestingSessionLocal
-import urllib.parse
 
-# Import the main app
+# Import the main app (imports from _shared_db for shared fixtures)
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
-
-from main import app, Base
-
-
-def _reset_rate_limiter():
-    """Reset slowapi rate limiter storage to prevent cross-test leaks."""
-    if hasattr(app.state, "limiter") and app.state.limiter is not None:
-        st = getattr(app.state.limiter, "_storage", None)
-        if st is not None:
-            try:
-                st.storage.clear()
-                st.expirations.clear()
-                st.events.clear()
-                if hasattr(st, "locks"):
-                    st.locks.clear()
-            except Exception:
-                pass
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create test client with proper DB table setup and rate limiter reset."""
-    # Create all tables for this test
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-    # Reset rate limiter
-    _reset_rate_limiter()
-
-    yield TestClient(app)
-
-    # Cleanup
-    Base.metadata.drop_all(bind=engine)
+from main import app
 
 
 @pytest.fixture(scope="function")

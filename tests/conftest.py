@@ -55,13 +55,8 @@ def client(_setup_tables):
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
-    # Reset slowapi rate limiter state if available
-    if hasattr(app.state, "limiter") and app.state.limiter is not None:
-        if hasattr(app.state.limiter, "storage"):
-            try:
-                app.state.limiter._storage.clear()
-            except Exception:
-                pass
+    # Reset slowapi rate limiter state (clears all internal dicts)
+    _reset_rate_limiter()
 
     yield TestClient(app)
 

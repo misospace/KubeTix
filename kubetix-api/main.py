@@ -73,10 +73,13 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     from kubetix_api.database import init_db
+    import os as _os
 
-    init_db()
+    # Skip init_db in test mode — conftest handles table creation
+    if not _os.environ.get("TESTING"):
+        init_db()
 
-    _admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+    _admin_password = _os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
     if not _admin_password:
         import logging
 
