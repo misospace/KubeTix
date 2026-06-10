@@ -40,6 +40,7 @@ except ImportError:
         def limit(self, *args, **kwargs):
             def decorator(f):
                 return f
+
             return decorator
 
     limiter = _NoOpLimiter()
