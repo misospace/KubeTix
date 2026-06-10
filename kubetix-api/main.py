@@ -29,9 +29,6 @@ try:
     from slowapi.errors import RateLimitExceeded
 
     HAS_RATE_LIMITING = True
-    # Disable rate limiting in test mode to avoid 429s during concurrent/bulk tests
-    if os.environ.get("TESTING"):
-        HAS_RATE_LIMITING = False
 except ImportError:
     HAS_RATE_LIMITING = False
 
@@ -59,6 +56,7 @@ if HAS_RATE_LIMITING:
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_event_handler("startup", limiter.slowapi_startup)
 
 app.add_middleware(
     CORSMiddleware,
@@ -238,7 +236,9 @@ from kubetix_api.grants import (  # noqa: E402
 
 
 @app.get("/grants", response_model=List[GrantResponse])
+@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
 async def list_grants(
+    request: Request,
     current_user: User = Depends(get_current_user), db=Depends(get_db)
 ):
     return list_grants_for_user(current_user, db)
@@ -256,7 +256,9 @@ async def create_grant_endpoint(
 
 
 @app.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
+@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
 async def download_grant(
+    request: Request,
     grant_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -265,7 +267,9 @@ async def download_grant(
 
 
 @app.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
 async def revoke_grant_endpoint(
+    request: Request,
     grant_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
