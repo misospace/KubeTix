@@ -12,6 +12,7 @@ All business logic lives in sub-packages:
 """
 
 import os
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import List
 
@@ -54,13 +55,64 @@ _CORS_ORIGINS_RAW = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:300
 ALLOWED_ORIGINS = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()]
 
 # ---------------------------------------------------------------------------
-# App factory
+# App factory with lifespan (modern FastAPI pattern)
 # ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup and shutdown hooks.
+
+    Replaces the deprecated @app.on_event("startup") pattern.
+    See: https://fastapi.tiangolo.com/advanced/events/
+    """
+    # Startup
+    from kubetix_api.database import init_db
+    import os as _os
+
+    # Skip init_db in test mode — conftest handles table creation
+    if not _os.environ.get("TESTING"):
+        init_db()
+
+    _admin_password = _os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+    if not _admin_password:
+        import logging
+
+        logging.warning(
+            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
+            "The API will run without a default admin account. "
+            "Create the first admin via /users registration or by setting "
+            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
+        )
+    else:
+        from kubetix_api.database import SessionLocal
+        from kubetix_api.models import User
+        from kubetix_api.auth import get_password_hash
+
+        db = SessionLocal()
+        try:
+            admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
+            if not admin:
+                admin = User(
+                    id=__import__("secrets").token_urlsafe(16),
+                    email="admin@kubetix.local",
+                    hashed_password=get_password_hash(_admin_password),
+                    full_name="Admin User",
+                    is_admin=True,
+                )
+                db.add(admin)
+                db.commit()
+        finally:
+            db.close()
+    yield
+    # Shutdown (no cleanup needed currently)
+
 
 app = FastAPI(
     title="KubeTix API",
     description="Temporary Kubernetes Access Manager",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 if HAS_RATE_LIMITING:
@@ -79,52 +131,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-
-
-@app.on_event("startup")
-async def startup_event():
-    from kubetix_api.database import init_db
-    import os as _os
-
-    # Skip init_db in test mode — conftest handles table creation
-    if not _os.environ.get("TESTING"):
-        init_db()
-
-    _admin_password = _os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
-    if not _admin_password:
-        import logging
-
-        logging.warning(
-            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
-            "The API will run without a default admin account. "
-            "Create the first admin via /users registration or by setting "
-            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
-        )
-        return
-
-    from kubetix_api.database import SessionLocal
-    from kubetix_api.models import User
-    from kubetix_api.auth import get_password_hash
-
-    db = SessionLocal()
-    try:
-        admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
-        if not admin:
-            admin = User(
-                id=__import__("secrets").token_urlsafe(16),
-                email="admin@kubetix.local",
-                hashed_password=get_password_hash(_admin_password),
-                full_name="Admin User",
-                is_admin=True,
-            )
-            db.add(admin)
-            db.commit()
-    finally:
-        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +564,10 @@ async def sso_callback(
 
 
 @app.get("/auth/sso/{provider}/login")
-async def sso_login(provider: str):
+async def sso_login(
+    provider: str,
+    db=Depends(get_db),
+):
     """Initiate SSO login flow — returns auth URL + code_verifier."""
     import urllib.parse
 
@@ -603,15 +612,9 @@ async def sso_login(provider: str):
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = secrets.token_urlsafe(32)
 
-    from kubetix_api.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        auth_code_id = _create_auth_code_record(
-            db, code_challenge, csrf_state, provider
-        )
-    finally:
-        db.close()
+    auth_code_id = _create_auth_code_record(
+        db, code_challenge, csrf_state, provider
+    )
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
@@ -718,7 +721,9 @@ async def oidc_callback(
 
 
 @app.get("/auth/oidc/login")
-async def oidc_login():
+async def oidc_login(
+    db=Depends(get_db),
+):
     """Initiate OIDC login with configured provider."""
     import urllib.parse
 
@@ -737,13 +742,7 @@ async def oidc_login():
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = __import__("secrets").token_urlsafe(32)
 
-    from kubetix_api.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
-    finally:
-        db.close()
+    auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
 
     params = {
         "client_id": oidc_client_id,
