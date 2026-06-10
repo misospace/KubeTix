@@ -148,6 +148,30 @@ The test suite covers: encryption, database operations, grant lifecycle, expiry 
 - **CI** (`ci.yml`): Runs tests, linting (flake8, black), and security scanning (bandit) on push and PR
 - **AI Review** (`ai-pr-review.yaml`): Automated AI review on all PRs to `main` using a reusable GitHub Action with LiteLLM-backed models
 
+
+## Dependency Management
+
+### Renovate Configuration
+
+KubeTix uses [Renovate](https://docs.renovatebot.com/) for automated dependency updates. The configuration is in `.renovaterc.json5` and extends the shared misospace org config (`github>misospace/renovate-config`).
+
+#### Automerge Policy
+
+| Update Type | Auto-Merge | Notes |
+|-------------|-----------|-------|
+| GitHub Actions (trusted) | ✅ Yes | 1-minute release age, branch merge |
+| GitHub Actions (other) | ✅ Yes | 3-day release age, branch merge |
+| Python minor/patch | ✅ Yes | 3-day release age, branch merge |
+| Python major | ❌ No | Requires manual review |
+| Docker images | Grouped | Manual review recommended |
+
+#### SLA for Dependency Updates
+
+- **Automated PRs**: Renovate creates PRs on a schedule (America/Edmonton timezone). Auto-merged PRs are handled without human intervention.
+- **Manual-review PRs** (major Python updates): Target resolution within **5 business days**. Label with `dependencies` for tracking.
+- **Security advisories**: Priority handling — review and merge within **24 hours** of notification.
+
+
 ## Contributing
 
 - Follow existing code style — Python uses stdlib + cryptography, API uses FastAPI patterns, web uses Next.js App Router
