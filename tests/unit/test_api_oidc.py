@@ -4,35 +4,12 @@ Tests OIDC authentication flows
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-import urllib.parse
 
-# Import the main app
+# Import the main app (imports from _shared_db for shared fixtures)
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
-
 from main import app
-
-
-# Test database
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create test client."""
-    yield TestClient(app)
 
 
 @pytest.fixture(scope="function")
@@ -54,14 +31,14 @@ def mock_google_sso_env(monkeypatch):
 
 @pytest.fixture(scope="function")
 def mock_github_sso_env(monkeypatch):
-    """Set up mock GitHub SSO environment variables."""
+    """Set up mock GitHub OAuth environment variables."""
     monkeypatch.setenv("SSO_GITHUB_CLIENT_ID", "github-test-client")
     monkeypatch.setenv("SSO_GITHUB_CLIENT_SECRET", "github-test-secret")
 
 
 @pytest.fixture(scope="function")
 def mock_okta_sso_env(monkeypatch):
-    """Set up mock Okta SSO environment variables."""
+    """Set up mock Okta OAuth environment variables."""
     monkeypatch.setenv("SSO_OKTA_ISSUER", "https://okta.example.com")
     monkeypatch.setenv("SSO_OKTA_CLIENT_ID", "okta-test-client")
     monkeypatch.setenv("SSO_OKTA_CLIENT_SECRET", "okta-test-secret")

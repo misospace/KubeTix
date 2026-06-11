@@ -13,6 +13,7 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from _shared_db import engine, TestingSessionLocal
 from fastapi.testclient import TestClient
 from pathlib import Path
 
@@ -27,96 +28,6 @@ _TEST_DB_URL = f"sqlite:///:memory:?dbname=audit_log_{secrets.token_hex(4)}"
 _engine = create_engine(_TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
 _TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
-def _override_get_db():
-    try:
-        db = _TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-
-@pytest.fixture(autouse=True)
-def _setup_test_db():
-    """Ensure test DB override is set for each test."""
-    app.dependency_overrides[get_db] = _override_get_db
-    yield
-    if get_db in app.dependency_overrides:
-        del app.dependency_overrides[get_db]
-
-
-@pytest.fixture(scope="function")
-def db():
-    """Create database tables for the test."""
-    Base.metadata.create_all(bind=_engine)
-    yield _TestingSessionLocal()
-    Base.metadata.drop_all(bind=_engine)
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create test client."""
-    yield TestClient(app)
-
-
-@pytest.fixture(scope="function")
-def auth_token(db):
-    """Create user and return auth token (bypasses login endpoint)."""
-    user = User(
-        id=secrets.token_urlsafe(16),
-        email="test@example.com",
-        hashed_password=get_password_hash("testpassword123")
-    )
-    db.add(user); db.commit(); db.refresh(user)
-    token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(minutes=60*24*7))
-    return token
-
-
-@pytest.fixture(scope="function")
-def auth_headers(auth_token):
-    return {"Authorization": f"Bearer {auth_token}"}
-
-
-@pytest.fixture(scope="function")
-def admin_user(db):
-    user = User(
-        id=secrets.token_urlsafe(16), email="admin@example.com",
-        hashed_password=get_password_hash("adminpassword123"),
-        is_admin=True, full_name="Admin User"
-    )
-    db.add(user); db.commit()
-    return user
-
-
-@pytest.fixture(scope="function")
-def admin_token(db, admin_user):
-    token = create_access_token(data={"sub": admin_user.email}, expires_delta=timedelta(minutes=60*24*7))
-    return token
-
-
-@pytest.fixture(scope="function")
-def admin_headers(admin_token):
-    return {"Authorization": f"Bearer {admin_token}"}
-
-
-@pytest.fixture(scope="function")
-def other_user(db):
-    user = User(
-        id=secrets.token_urlsafe(16), email="other@example.com",
-        hashed_password=get_password_hash("otherpassword123")
-    )
-    db.add(user); db.commit()
-    return user
-
-
-@pytest.fixture(scope="function")
-def other_token(db, other_user):
-    token = create_access_token(data={"sub": other_user.email}, expires_delta=timedelta(minutes=60*24*7))
-    return token
-
-
-@pytest.fixture(scope="function")
-def other_headers(other_token):
-    return {"Authorization": f"Bearer {other_token}"}
 
 
 class TestAuditLogEndpoint:

@@ -14,6 +14,7 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import StaticPool
+from _shared_db import engine, TestingSessionLocal
 from fastapi.testclient import TestClient
 from pathlib import Path
 
@@ -22,94 +23,20 @@ os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "kubetix-api"))
 from main import app, Base, get_db, User, Grant, get_password_hash, create_access_token
+from cryptography.fernet import Fernet
+
+# Fernet encryption helper for creating test encrypted kubeconfig grants
+def _fernet_encrypt(data: str) -> str:
+    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
+    if not key:
+        raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
+    return Fernet(key.encode()).encrypt(data.encode()).decode()
 
 # Test database (in-memory SQLite)
 _TEST_DB_URL = f"sqlite:///:memory:?dbname=download_grant_{secrets.token_hex(4)}"
 _engine = create_engine(_TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
 _TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
-def _override_get_db():
-    try:
-        db = _TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-_test_fernet = Fernet(b"NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso=")
-def _fernet_encrypt(data):
-    return _test_fernet.encrypt(data.encode()).decode()
-
-
-@pytest.fixture(autouse=True)
-def _setup_test_db():
-    """Ensure test DB override is set for each test."""
-    app.dependency_overrides[get_db] = _override_get_db
-    yield
-    if get_db in app.dependency_overrides:
-        del app.dependency_overrides[get_db]
-
-
-@pytest.fixture(scope="function")
-def db():
-    """Create database tables for the test."""
-    Base.metadata.create_all(bind=_engine)
-    yield _TestingSessionLocal()
-    Base.metadata.drop_all(bind=_engine)
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create test client."""
-    yield TestClient(app)
-
-
-@pytest.fixture(scope="function")
-def auth_token(db):
-    """Create user and return auth token (bypasses login endpoint)."""
-    user = User(
-        id=secrets.token_urlsafe(16),
-        email="test@example.com",
-        hashed_password=get_password_hash("testpassword123")
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=timedelta(minutes=60 * 24 * 7)
-    )
-    return token
-
-
-@pytest.fixture(scope="function")
-def auth_headers(auth_token):
-    return {"Authorization": f"Bearer {auth_token}"}
-
-
-@pytest.fixture(scope="function")
-def other_user(db):
-    user = User(
-        id=secrets.token_urlsafe(16),
-        email="other@example.com",
-        hashed_password=get_password_hash("otherpassword123")
-    )
-    db.add(user)
-    db.commit()
-    return user
-
-
-@pytest.fixture(scope="function")
-def other_token(db, other_user):
-    token = create_access_token(
-        data={"sub": other_user.email},
-        expires_delta=timedelta(minutes=60 * 24 * 7)
-    )
-    return token
-
-
-@pytest.fixture(scope="function")
-def other_headers(other_token):
-    return {"Authorization": f"Bearer {other_token}"}
 
 
 class TestDownloadGrant:

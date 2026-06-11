@@ -12,12 +12,13 @@ All business logic lives in sub-packages:
 """
 
 import os
-from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import List
 
 import secrets
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Header, status
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
 
 # ---------------------------------------------------------------------------
 # Rate limiting (optional)
@@ -29,8 +30,21 @@ try:
     from slowapi.errors import RateLimitExceeded
 
     HAS_RATE_LIMITING = True
+    limiter = Limiter(
+        key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
+    )
 except ImportError:
     HAS_RATE_LIMITING = False
+
+    # No-op limiter so decorators always work regardless of rate limiting config.
+    class _NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(f):
+                return f
+
+            return decorator
+
+    limiter = _NoOpLimiter()
 
 # ---------------------------------------------------------------------------
 # CORS middleware
@@ -41,19 +55,74 @@ _CORS_ORIGINS_RAW = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:300
 ALLOWED_ORIGINS = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()]
 
 # ---------------------------------------------------------------------------
-# App factory
+# App factory with lifespan (modern FastAPI pattern)
 # ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup and shutdown hooks.
+
+    Replaces the deprecated @app.on_event("startup") pattern.
+    See: https://fastapi.tiangolo.com/advanced/events/
+    """
+    # Startup
+    from kubetix_api.database import init_db
+    import os as _os
+
+    # Skip init_db in test mode — conftest handles table creation
+    if not _os.environ.get("TESTING"):
+        init_db()
+
+    _admin_password = _os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+    if not _admin_password:
+        import logging
+
+        logging.warning(
+            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
+            "The API will run without a default admin account. "
+            "Create the first admin via /users registration or by setting "
+            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
+        )
+    else:
+        from kubetix_api.database import SessionLocal
+        from kubetix_api.models import User
+        from kubetix_api.auth import get_password_hash
+
+        db = SessionLocal()
+        try:
+            admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
+            if not admin:
+                admin = User(
+                    id=__import__("secrets").token_urlsafe(16),
+                    email="admin@kubetix.local",
+                    hashed_password=get_password_hash(_admin_password),
+                    full_name="Admin User",
+                    is_admin=True,
+                )
+                db.add(admin)
+                db.commit()
+        finally:
+            db.close()
+    yield
+    # Shutdown (no cleanup needed currently)
+
 
 app = FastAPI(
     title="KubeTix API",
     description="Temporary Kubernetes Access Manager",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 if HAS_RATE_LIMITING:
-    limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # Register slowapi startup handler (compatible with all FastAPI versions)
+    if hasattr(app, "add_event_handler"):
+        app.add_event_handler("startup", limiter.slowapi_startup)
+    else:
+        app.on_event("startup")(limiter.slowapi_startup)
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,72 +134,52 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Startup — create tables + optional admin bootstrap
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event():
-    from kubetix_api.database import init_db
-
-    init_db()
-
-    _admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
-    if not _admin_password:
-        import logging
-        logging.warning(
-            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
-            "The API will run without a default admin account. "
-            "Create the first admin via /users registration or by setting "
-            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
-        )
-        return
-
-    from kubetix_api.database import SessionLocal
-    from kubetix_api.models import User
-    from kubetix_api.auth import get_password_hash
-
-    db = SessionLocal()
-    try:
-        admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
-        if not admin:
-            admin = User(
-                id=__import__("secrets").token_urlsafe(16),
-                email="admin@kubetix.local",
-                hashed_password=get_password_hash(_admin_password),
-                full_name="Admin User",
-                is_admin=True,
-            )
-            db.add(admin)
-            db.commit()
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
 # Re-export shared dependencies for route handlers and tests
 # ---------------------------------------------------------------------------
 
-from kubetix_api.database import get_db
-from kubetix_api.auth import get_current_user, get_password_hash, create_access_token, verify_password
-from kubetix_api.models import Base, User, Team, TeamMember, AuthCode, Grant, AuditLog
-from kubetix_api.schemas import (
-    UserCreate, UserLogin, UserResponse,
-    GrantCreate, GrantResponse, GrantWithKubeconfig, Token,
-    TeamCreate, TeamResponse, TeamMemberCreate, TeamMemberResponse,
+from kubetix_api.database import get_db  # noqa: E402
+from kubetix_api.auth import (  # noqa: E402
+    get_current_user,
+    get_password_hash,
+    create_access_token,
+    verify_password,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)  # noqa: E402
+from kubetix_api.models import (  # noqa: E402,F401
+    Base,
+    User,
+    Team,
+    TeamMember,
+    AuthCode,
+    Grant,
+    AuditLog,
+)  # noqa: E402,F401
+from kubetix_api.schemas import (  # noqa: E402
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    GrantCreate,
+    GrantResponse,
+    GrantWithKubeconfig,
+    Token,
+    TeamCreate,
+    TeamResponse,
+    TeamMemberCreate,
+    TeamMemberResponse,
 )
 
 # ---------------------------------------------------------------------------
 # User endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("5 per hour") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per hour")
 async def register_user(
     request: Request,
     user_data: UserCreate,
     db=Depends(get_db),
 ):
-    from kubetix_api.auth import get_password_hash
     from kubetix_api.models import User as UserModel
 
     existing = db.query(UserModel).filter(UserModel.email == user_data.email).first()
@@ -153,13 +202,12 @@ async def register_user(
 
 
 @app.post("/login", response_model=Token)
-@limiter.limit("10 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per minute")
 async def login(
     request: Request,
     user_data: UserLogin,
     db=Depends(get_db),
 ):
-    from kubetix_api.auth import verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
     from kubetix_api.models import User as UserModel
 
     user = db.query(UserModel).filter(UserModel.email == user_data.email).first()
@@ -198,18 +246,25 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 # Grant endpoints
 # ---------------------------------------------------------------------------
 
-from kubetix_api.grants import (
-    list_grants_for_user, create_grant, get_grant, revoke_grant, get_audit_log,
+from kubetix_api.grants import (  # noqa: E402
+    list_grants_for_user,
+    create_grant,
+    get_grant,
+    revoke_grant,
+    get_audit_log,
 )
 
 
 @app.get("/grants", response_model=List[GrantResponse])
-async def list_grants(current_user: User = Depends(get_current_user), db=Depends(get_db)):
+@limiter.limit("10 per minute")
+async def list_grants(
+    request: Request, current_user: User = Depends(get_current_user), db=Depends(get_db)
+):
     return list_grants_for_user(current_user, db)
 
 
 @app.post("/grants", response_model=GrantResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit("10 per hour") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("10 per hour")
 async def create_grant_endpoint(
     request: Request,
     grant_data: GrantCreate,
@@ -220,7 +275,9 @@ async def create_grant_endpoint(
 
 
 @app.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
+@limiter.limit("10 per minute")
 async def download_grant(
+    request: Request,
     grant_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -229,7 +286,9 @@ async def download_grant(
 
 
 @app.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5 per minute")
 async def revoke_grant_endpoint(
+    request: Request,
     grant_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -249,8 +308,13 @@ async def get_audit_log_endpoint(
 # Team endpoints
 # ---------------------------------------------------------------------------
 
-from kubetix_api.teams import (
-    create_team, list_teams, get_team, add_team_member, remove_team_member, list_team_members,
+from kubetix_api.teams import (  # noqa: E402
+    create_team,
+    list_teams,
+    get_team,
+    add_team_member,
+    remove_team_member,
+    list_team_members,
 )
 
 
@@ -290,7 +354,9 @@ async def add_team_member_endpoint(
     return add_team_member(team_id, member_data, current_user, db)
 
 
-@app.delete("/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_team_member_endpoint(
     team_id: str,
     user_id: str,
@@ -298,6 +364,8 @@ async def remove_team_member_endpoint(
     db=Depends(get_db),
 ):
     remove_team_member(team_id, user_id, current_user, db)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
@@ -313,7 +381,7 @@ async def list_team_members_endpoint(
 # SSO / OIDC endpoints
 # ---------------------------------------------------------------------------
 
-from kubetix_api.oidc import (
+from kubetix_api.oidc import (  # noqa: E402
     _generate_pkce_params,
     _create_auth_code_record,
     _verify_auth_code,
@@ -323,7 +391,7 @@ from kubetix_api.oidc import (
 
 
 @app.post("/auth/sso/callback")
-@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per minute")
 async def sso_callback(
     request: Request,
     provider: str,
@@ -347,8 +415,10 @@ async def sso_callback(
             "client_secret_env": "SSO_GITHUB_CLIENT_SECRET",
         },
         "okta": {
-            "token_url": os.environ.get("SSO_OKTA_ISSUER", "").rstrip("/") + "/oauth2/default/v1/token",
-            "userinfo_url": os.environ.get("SSO_OKTA_ISSUER", "").rstrip("/") + "/oauth2/default/v1/userinfo",
+            "token_url": os.environ.get("SSO_OKTA_ISSUER", "").rstrip("/")
+            + "/oauth2/default/v1/token",
+            "userinfo_url": os.environ.get("SSO_OKTA_ISSUER", "").rstrip("/")
+            + "/oauth2/default/v1/userinfo",
             "client_id_env": "SSO_OKTA_CLIENT_ID",
             "client_secret_env": "SSO_OKTA_CLIENT_SECRET",
         },
@@ -359,8 +429,10 @@ async def sso_callback(
             "client_secret_env": "SSO_AZURE_CLIENT_SECRET",
         },
         "authentik": {
-            "token_url": os.environ.get("SSO_AUTHENTIK_ISSUER", "").rstrip("/") + "/application/o/token/",
-            "userinfo_url": os.environ.get("SSO_AUTHENTIK_ISSUER", "").rstrip("/") + "/application/o/userinfo/",
+            "token_url": os.environ.get("SSO_AUTHENTIK_ISSUER", "").rstrip("/")
+            + "/application/o/token/",
+            "userinfo_url": os.environ.get("SSO_AUTHENTIK_ISSUER", "").rstrip("/")
+            + "/application/o/userinfo/",
             "client_id_env": "SSO_AUTHENTIK_CLIENT_ID",
             "client_secret_env": "SSO_AUTHENTIK_CLIENT_SECRET",
         },
@@ -391,9 +463,14 @@ async def sso_callback(
             detail="Missing required parameters: state and code_verifier",
         )
     if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
-        raise HTTPException(status_code=400, detail="Invalid or expired authorization state")
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired authorization state"
+        )
 
-    redirect_uri = os.environ.get("SSO_REDIRECT_URI", f"http://localhost:8000/auth/sso/callback?provider={provider}")
+    redirect_uri = os.environ.get(
+        "SSO_REDIRECT_URI",
+        f"http://localhost:8000/auth/sso/callback?provider={provider}",
+    )
 
     if provider == "github":
         resp = httpx.post(
@@ -416,17 +493,27 @@ async def sso_callback(
         )
 
     if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Failed to exchange authorization code for token")
+        raise HTTPException(
+            status_code=401, detail="Failed to exchange authorization code for token"
+        )
 
     token_data = resp.json()
     access_token = token_data.get("access_token")
     if not access_token:
-        raise HTTPException(status_code=401, detail="No access token received from provider")
+        raise HTTPException(
+            status_code=401, detail="No access token received from provider"
+        )
 
-    headers = {"Authorization": f"Bearer {access_token}"} if provider != "github" else {"Authorization": f"token {access_token}", "Accept": "application/json"}
+    headers = (
+        {"Authorization": f"Bearer {access_token}"}
+        if provider != "github"
+        else {"Authorization": f"token {access_token}", "Accept": "application/json"}
+    )
     userinfo_resp = httpx.get(cfg["userinfo_url"], headers=headers, timeout=10)
     if userinfo_resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Failed to fetch user information from provider")
+        raise HTTPException(
+            status_code=401, detail="Failed to fetch user information from provider"
+        )
 
     userinfo = userinfo_resp.json()
 
@@ -441,7 +528,11 @@ async def sso_callback(
         email = userinfo.get("email")
         full_name = userinfo.get("name")
     elif provider == "azure-ad":
-        email = userinfo.get("email") or userinfo.get("mail") or userinfo.get("userPrincipalName")
+        email = (
+            userinfo.get("email")
+            or userinfo.get("mail")
+            or userinfo.get("userPrincipalName")
+        )
         full_name = userinfo.get("displayName")
     elif provider == "authentik":
         email = userinfo.get("email")
@@ -450,12 +541,19 @@ async def sso_callback(
         email = userinfo.get("email")
 
     if not email:
-        raise HTTPException(status_code=401, detail="Provider did not return an email address")
+        raise HTTPException(
+            status_code=401, detail="Provider did not return an email address"
+        )
 
-    sso_id = str(userinfo.get("sub") or userinfo.get("id") or userinfo.get("github_id", ""))
+    sso_id = str(
+        userinfo.get("sub") or userinfo.get("id") or userinfo.get("github_id", "")
+    )
 
     from kubetix_api.models import provision_user
-    user = provision_user(db, email=email, full_name=full_name, sso_provider=provider, sso_id=sso_id)
+
+    user = provision_user(
+        db, email=email, full_name=full_name, sso_provider=provider, sso_id=sso_id
+    )
 
     access_token_jwt = create_access_token(
         data={"sub": user.email},
@@ -466,13 +564,22 @@ async def sso_callback(
 
 
 @app.get("/auth/sso/{provider}/login")
-async def sso_login(provider: str):
+async def sso_login(
+    provider: str,
+    db=Depends(get_db),
+):
     """Initiate SSO login flow — returns auth URL + code_verifier."""
     import urllib.parse
 
     provider_configs = {
-        "google": {"auth_url": "https://accounts.google.com/o/oauth2/v2/auth", "scope": "openid email profile"},
-        "github": {"auth_url": "https://github.com/login/oauth/authorize", "scope": "user:email"},
+        "google": {
+            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+            "scope": "openid email profile",
+        },
+        "github": {
+            "auth_url": "https://github.com/login/oauth/authorize",
+            "scope": "user:email",
+        },
         "okta": {
             "auth_url": f"{os.environ.get('SSO_OKTA_ISSUER', '{your-okta-domain}')}/oauth2/default/v1/authorize",
             "scope": "openid email profile",
@@ -505,14 +612,12 @@ async def sso_login(provider: str):
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = secrets.token_urlsafe(32)
 
-    from kubetix_api.database import SessionLocal
-    db = SessionLocal()
-    try:
-        auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, provider)
-    finally:
-        db.close()
+    auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, provider)
 
-    redirect_uri = os.environ.get("SSO_REDIRECT_URI", f"http://localhost:8000/auth/sso/callback?provider={provider}")
+    redirect_uri = os.environ.get(
+        "SSO_REDIRECT_URI",
+        f"http://localhost:8000/auth/sso/callback?provider={provider}",
+    )
 
     params = {
         "client_id": client_id,
@@ -535,7 +640,7 @@ async def sso_login(provider: str):
 
 
 @app.post("/auth/oidc/callback")
-@limiter.limit("5 per minute") if HAS_RATE_LIMITING else (lambda x: x)
+@limiter.limit("5 per minute")
 async def oidc_callback(
     request: Request,
     code: str,
@@ -545,7 +650,9 @@ async def oidc_callback(
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
     oidc_client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
-    oidc_redirect_uri = os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback")
+    oidc_redirect_uri = os.environ.get(
+        "OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback"
+    )
 
     if not all([oidc_issuer, oidc_client_id, oidc_client_secret]):
         raise HTTPException(
@@ -556,33 +663,52 @@ async def oidc_callback(
     auth_code_id = request.query_params.get("state", "")
     code_verifier = request.query_params.get("code_verifier", "")
     if not auth_code_id or not code_verifier:
-        raise HTTPException(status_code=400, detail="Missing required parameters: state and code_verifier")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required parameters: state and code_verifier",
+        )
     if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
-        raise HTTPException(status_code=400, detail="Invalid or expired authorization state")
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired authorization state"
+        )
 
     try:
-        token_data = _exchange_code_for_tokens(oidc_issuer, oidc_client_id, oidc_client_secret, code, oidc_redirect_uri)
+        token_data = _exchange_code_for_tokens(
+            oidc_issuer, oidc_client_id, oidc_client_secret, code, oidc_redirect_uri
+        )
     except Exception:
-        raise HTTPException(status_code=401, detail="Failed to exchange authorization code for token")
+        raise HTTPException(
+            status_code=401, detail="Failed to exchange authorization code for token"
+        )
 
     access_token = token_data.get("access_token")
     if not access_token:
-        raise HTTPException(status_code=401, detail="No access token received from OIDC provider")
+        raise HTTPException(
+            status_code=401, detail="No access token received from OIDC provider"
+        )
 
     try:
         userinfo = _get_userinfo(issuer=oidc_issuer, access_token=access_token)
     except Exception:
-        raise HTTPException(status_code=401, detail="Failed to fetch user information from OIDC provider")
+        raise HTTPException(
+            status_code=401,
+            detail="Failed to fetch user information from OIDC provider",
+        )
 
     email = userinfo.get("email")
     if not email:
-        raise HTTPException(status_code=401, detail="OIDC provider did not return an email address")
+        raise HTTPException(
+            status_code=401, detail="OIDC provider did not return an email address"
+        )
 
     full_name = userinfo.get("name") or userinfo.get("preferred_username")
     sso_id = str(userinfo.get("sub", ""))
 
     from kubetix_api.models import provision_user
-    user = provision_user(db, email=email, full_name=full_name, sso_provider="oidc", sso_id=sso_id)
+
+    user = provision_user(
+        db, email=email, full_name=full_name, sso_provider="oidc", sso_id=sso_id
+    )
 
     access_token_jwt = create_access_token(
         data={"sub": user.email},
@@ -593,26 +719,28 @@ async def oidc_callback(
 
 
 @app.get("/auth/oidc/login")
-async def oidc_login():
+async def oidc_login(
+    db=Depends(get_db),
+):
     """Initiate OIDC login with configured provider."""
     import urllib.parse
 
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
-    oidc_redirect_uri = os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback")
+    oidc_redirect_uri = os.environ.get(
+        "OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback"
+    )
 
     if not oidc_issuer or not oidc_client_id:
-        raise HTTPException(status_code=400, detail="OIDC not configured. Set OIDC_ISSUER and OIDC_CLIENT_ID.")
+        raise HTTPException(
+            status_code=400,
+            detail="OIDC not configured. Set OIDC_ISSUER and OIDC_CLIENT_ID.",
+        )
 
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = __import__("secrets").token_urlsafe(32)
 
-    from kubetix_api.database import SessionLocal
-    db = SessionLocal()
-    try:
-        auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
-    finally:
-        db.close()
+    auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
 
     params = {
         "client_id": oidc_client_id,
@@ -648,6 +776,7 @@ async def oidc_userinfo(current_user: User = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health")
 async def health_check():

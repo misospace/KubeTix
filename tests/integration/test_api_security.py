@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from _shared_db import engine, TestingSessionLocal
 import secrets
 import os
 import tempfile
@@ -23,70 +24,8 @@ from main import app, Base, get_db, User, Grant, get_password_hash
 
 
 # Test database
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create test client with fresh database."""
-    Base.metadata.create_all(bind=engine)
-    yield TestClient(app)
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    """Create database session for tests."""
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def auth_token(client, db_session):
-    """Create user and return auth token."""
-    user = User(
-        id=secrets.token_urlsafe(16),
-        email="test@example.com",
-        hashed_password=get_password_hash("testpassword123")
-    )
-    db_session.add(user)
-    db_session.commit()
-    
-    response = client.post(
-        "/login",
-        json={
-            "email": "test@example.com",
-            "password": "testpassword123"
-        }
-    )
-    return response.json()["access_token"]
-
-
-@pytest.fixture(scope="function")
-def auth_headers(auth_token):
-    """Return authorization headers."""
-    return {"Authorization": f"Bearer {auth_token}"}
 
 
 class TestSQLInjectionPrevention:
