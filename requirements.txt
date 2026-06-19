@@ -1,7 +1,7 @@
 cryptography>=3.4.0
 slowapi>=0.1.9
 
-bcrypt>=4.0.0,<5.0.0  # passlib compatibility; 5.x breaks CryptContext
+bcrypt>=5.0.0,<5.1.0  # passlib compatibility; 5.x breaks CryptContext
 
 # Test dependencies
 pytest>=7.0.0
