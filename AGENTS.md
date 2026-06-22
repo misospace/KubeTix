@@ -181,42 +181,23 @@ KubeTix uses [Renovate](https://docs.renovatebot.com/) for automated dependency 
 
 ### Release Process
 
-KubeTix does not currently have an automated release workflow. Releases are manual.
+KubeTix releases are started manually and completed by GitHub Actions. The version bump travels through a protected-branch PR.
 
 #### Steps
 
-1. **Ensure main is ready**
-   - All intended changes are merged to `main`
-   - CI passes on `main`
+1. Open **Actions → Manual Release → Run workflow** and enter a plain semver version such as `0.1.1`.
+2. Follow the linked release PR. It updates the API, web package, Helm chart, and manifest versions, then auto-merges after required checks pass.
+3. `Publish Release` verifies every version source, tags the merge commit, and creates the GitHub release.
 
-2. **Create a tag**
-   ```bash
-   git checkout main
-   git pull --ff-only --tags origin main
-   git tag <version>
-   git push origin <version>
-   ```
-
-3. **Create a GitHub release**
-   ```bash
-   gh release create <version> \
-     --repo misospace/KubeTix \
-     --title "<version>" \
-     --generate-notes
-   ```
-
-   If a Docker image should be published, run the `Build` workflow manually from **Actions → Build → Run workflow**, targeting the release tag.
+If a Docker image should be published, run **Build, Publish & E2E** manually against the release tag.
 
 #### Version convention
 
 - Tags use plain semver (e.g. `0.1.0`, no `v` prefix)
-- Version source of truth is `kc-share.py` / the project version constant
+- Release automation keeps the web package, API, Helm chart, and Kubernetes manifest versions aligned
 
 #### Validation gates
 
-Before pushing a release tag:
-- `python3 -m pytest` passes
-- `python3 test_integration.py` passes
-- CI passes on `main`
+The release PR must pass the protected branch's required Python, frontend, Helm, security, and E2E checks before auto-merge.
 
 # Note: AI PR Review action version pinned to v1.0.18 for stability.

@@ -1,0 +1,118 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (for example 0.1.1 or v0.1.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Generate bot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kubetix-web/package-lock.json
+
+      - name: Normalize and validate version
+        id: version
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${RAW_VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $RAW_VERSION"
+            exit 1
+          fi
+          if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update project versions
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          (cd kubetix-web && npm version "$VERSION" --no-git-tag-version)
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          version = os.environ["VERSION"]
+          updates = {
+              "kubetix-api/kubetix_api/__init__.py": [(r'^__version__ = ".*"$', f'__version__ = "{version}"')],
+              "kubetix-api/main.py": [(r'^    version=".*",$', f'    version="{version}",')],
+              "charts/kubetix/Chart.yaml": [
+                  (r'^version: .*$', f'version: {version}'),
+                  (r'^appVersion: ".*"$', f'appVersion: "{version}"'),
+              ],
+              "kubetix-api/manifests/kustomization.yaml": [(r'^  version: ".*"$', f'  version: "{version}"')],
+          }
+          for filename, replacements in updates.items():
+              path = Path(filename)
+              text = path.read_text()
+              for pattern, replacement in replacements:
+                  text, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+                  if count != 1:
+                      raise SystemExit(f"Failed to update {pattern!r} in {filename}")
+              path.write_text(text)
+          PY
+
+      - name: Commit and push release branch
+        id: branch
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/release-v${VERSION}-${GITHUB_RUN_ID}"
+          git config user.name "smurf-bot[bot]"
+          git config user.email "smurf-bot[bot]@users.noreply.github.com"
+          git add charts/kubetix/Chart.yaml kubetix-api/kubetix_api/__init__.py kubetix-api/main.py kubetix-api/manifests/kustomization.yaml kubetix-web/package.json kubetix-web/package-lock.json
+          git commit -m "chore(release): bump version to ${VERSION}"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open release PR and enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          PR_URL=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): bump version to ${VERSION}" \
+            --body "Version bump for release ${VERSION}. The release will be published after this PR passes the required checks and merges.")
+          gh pr merge "$PR_URL" --auto --squash --delete-branch
+          echo "Release PR: $PR_URL"
