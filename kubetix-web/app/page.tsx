@@ -127,7 +127,7 @@ export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [currentUser, setCurrentUser] = useState<UserResponse | null>(null)
   const [showLoginModal, setShowLoginModal] = useState(false)
-  const [loginEmail, setLoginEmail] = useState("admin@kubetix.local")
+  const [loginEmail, setLoginEmail] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginSubmitting, setLoginSubmitting] = useState(false)
@@ -200,7 +200,7 @@ export default function Home() {
       setCurrentUser(auth.user)
       setIsLoggedIn(true)
       setShowLoginModal(false)
-      setLoginEmail("admin@kubetix.local")
+      setLoginEmail("")
       setLoginPassword("")
       
       // Fetch grants after login
@@ -355,7 +355,7 @@ export default function Home() {
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="admin@kubetix.local"
+                placeholder="you@example.com"
                 required
               />
             </div>
@@ -369,7 +369,7 @@ export default function Home() {
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                placeholder="admin123"
+                placeholder="Password"
                 required
               />
             </div>
@@ -401,7 +401,7 @@ export default function Home() {
           </form>
 
           <p className="text-xs text-gray-400 text-center mt-6">
-            Default credentials: admin@kubetix.local / admin123
+            First-time setup? <a href="https://github.com/misospace/KubeTix/blob/main/README.md" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">See the docs</a>
           </p>
         </div>
       </div>
