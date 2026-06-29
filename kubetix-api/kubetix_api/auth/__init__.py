@@ -56,14 +56,6 @@ def is_blacklisted(jti: str) -> bool:
     return True
 
 
-def _cleanup_blacklist() -> None:
-    """Remove expired entries from the blacklist."""
-    now = datetime.now(timezone.utc)
-    expired = [jti for jti, exp in _TOKEN_BLACKLIST.items() if now >= exp]
-    for jti in expired:
-        del _TOKEN_BLACKLIST[jti]
-
-
 # ---------------------------------------------------------------------------
 # JWT helpers
 # ---------------------------------------------------------------------------
