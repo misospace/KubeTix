@@ -241,6 +241,7 @@ async def login(
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("10 per minute")
 async def logout(
+    request: Request,
     authorization: str = Header(None),
 ):
     """Blacklist the current JWT so it cannot be reused."""
