@@ -51,3 +51,4 @@ Thumbs.db
 # Database files
 *.db
 kubetix.db
+node_modules/

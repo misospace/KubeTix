@@ -83,14 +83,21 @@ def _create_auth_code_record(
     state: str,
     provider: str,
 ) -> str:
-    """Persist PKCE challenge + CSRF state; returns the auth_code id."""
+    """Persist PKCE challenge + CSRF state; returns the auth_code id.
+
+    The record's own id (a random token) is stored in the `state` column
+    because that is what the auth URL sends to the IdP as the `state` parameter.
+    The caller-passed `state` (csrf_state) is retained for backward compatibility
+    but is not written to the DB — the IdP echoes back the record id, not it.
+    """
     from kubetix_api.models import AuthCode
 
+    auth_code_id = secrets.token_urlsafe(16)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     record = AuthCode(
-        id=secrets.token_urlsafe(16),
+        id=auth_code_id,
         code_challenge=code_challenge,
-        state=state,
+        state=auth_code_id,
         provider=provider,
         expires_at=expires_at,
     )
