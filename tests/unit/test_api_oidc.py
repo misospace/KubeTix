@@ -217,3 +217,157 @@ class TestCORSLocking:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestSSORoundTrip:
+    """Tests for SSO/OIDC callback state verification round-trip."""
+
+    def test_sso_google_login_and_callback_roundtrip(
+        self, client, db, mock_google_sso_env, monkeypatch
+    ):
+        """Test that a full Google SSO login -> callback round-trip succeeds.
+
+        Verifies that the state stored at login matches what the IdP echoes back
+        and that PKCE verification passes.
+        """
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login
+        response = client.get("/auth/sso/google/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+
+        # 2. Extract the state from the auth_url (it is the auth_code id)
+        import urllib.parse
+        parsed = urllib.parse.urlparse(login_data["auth_url"])
+        query = urllib.parse.parse_qs(parsed.query)
+        auth_code_id = query["state"][0]
+
+        # 3. Mock the token exchange and userinfo calls
+        mock_token_resp = httpx.Response(
+            200,
+            json={"access_token": "mock-google-access-token", "token_type": "Bearer"},
+        )
+        mock_userinfo_resp = httpx.Response(
+            200,
+            json={
+                "email": "sso-test@example.com",
+                "name": "SSO Test User",
+                "sub": "google-12345",
+            },
+        )
+
+        with patch("httpx.post", return_value=mock_token_resp), \
+             patch("httpx.get", return_value=mock_userinfo_resp):
+            # 4. Call the callback endpoint with the same state (auth_code_id)
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-auth-code"
+                f"&state={auth_code_id}&code_verifier={code_verifier}"
+            )
+
+        # 5. The callback must succeed - this proves state verification works
+        assert response.status_code == 200, (
+            f"Callback failed with {response.status_code}: "
+            f"{response.json().get('detail', 'no detail')}"
+        )
+        data = response.json()
+        assert data["user"]["email"] == "sso-test@example.com"
+        assert "access_token" in data
+
+    def test_oidc_login_and_callback_roundtrip(
+        self, client, db, mock_oidc_env, monkeypatch
+    ):
+        """Test that a full generic OIDC login -> callback round-trip succeeds."""
+        from unittest.mock import patch
+
+        # 1. Initiate login
+        response = client.get("/auth/oidc/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+
+        # 2. Extract the state from the auth_url
+        import urllib.parse
+        parsed = urllib.parse.urlparse(login_data["auth_url"])
+        query = urllib.parse.parse_qs(parsed.query)
+        auth_code_id = query["state"][0]
+
+        # 3. Mock the internal OIDC helpers (they import httpx lazily)
+        with patch(
+            "main._exchange_code_for_tokens",
+            return_value={"access_token": "mock-oidc-access-token"},
+        ), patch(
+            "main._get_userinfo",
+            return_value={
+                "email": "oidc-test@example.com",
+                "name": "OIDC Test User",
+                "sub": "oidc-67890",
+            },
+        ):
+            response = client.post(
+                "/auth/oidc/callback?code=fake-auth-code"
+                f"&state={auth_code_id}&code_verifier={code_verifier}"
+            )
+
+        # 4. Callback must succeed
+        assert response.status_code == 200, (
+            f"Callback failed with {response.status_code}: "
+            f"{response.json().get('detail', 'no detail')}"
+        )
+        data = response.json()
+        assert data["user"]["email"] == "oidc-test@example.com"
+
+    def test_sso_callback_rejects_wrong_state(self, client, mock_google_sso_env):
+        """Test that callback rejects a state value that doesn't match any record."""
+        response = client.post(
+            "/auth/sso/callback?provider=google&code=fake-auth-code"
+            "&state=nonexistent-state&code_verifier=some-verifier"
+        )
+        assert response.status_code == 400
+        assert "invalid or expired" in response.json()["detail"].lower()
+
+    def test_sso_callback_rejects_reused_state(self, client, db, mock_google_sso_env, monkeypatch):
+        """Test that a successfully-used auth code cannot be reused."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login
+        response = client.get("/auth/sso/google/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+
+        import urllib.parse
+        parsed = urllib.parse.urlparse(login_data["auth_url"])
+        query = urllib.parse.parse_qs(parsed.query)
+        auth_code_id = query["state"][0]
+
+        mock_token_resp = httpx.Response(
+            200,
+            json={"access_token": "mock-token", "token_type": "Bearer"},
+        )
+        mock_userinfo_resp = httpx.Response(
+            200,
+            json={"email": "reuse@example.com", "name": "Reuse", "sub": "sub-1"},
+        )
+
+        # 2. First callback succeeds
+        with patch("httpx.post", return_value=mock_token_resp), \
+             patch("httpx.get", return_value=mock_userinfo_resp):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state={auth_code_id}&code_verifier={code_verifier}"
+            )
+        assert response.status_code == 200
+
+        # 3. Second callback with same state must fail (record marked used)
+        with patch("httpx.post", return_value=mock_token_resp), \
+             patch("httpx.get", return_value=mock_userinfo_resp):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state={auth_code_id}&code_verifier={code_verifier}"
+            )
+        assert response.status_code == 400
+        assert "invalid or expired" in response.json()["detail"].lower()
