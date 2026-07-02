@@ -371,3 +371,50 @@ class TestSSORoundTrip:
             )
         assert response.status_code == 400
         assert "invalid or expired" in response.json()["detail"].lower()
+
+    def test_sso_callback_rejects_mismatched_csrf_state(self, client, db, mock_google_sso_env, monkeypatch):
+        """Regression test: callback must reject a request where the state
+        does not match the CSRF token stored during login, even if the
+        code_verifier is correct. This verifies that the IdP-echoed state
+        is actually checked (not just any valid auth_code record)."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login — get csrf_state and code_verifier
+        response = client.get("/auth/sso/google/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+        csrf_state = login_data["csrf_state"]
+
+        # 2. Verify the auth URL carries the csrf_state (not an internal id)
+        import urllib.parse
+        parsed = urllib.parse.urlparse(login_data["auth_url"])
+        query = urllib.parse.parse_qs(parsed.query)
+        assert query["state"][0] == csrf_state, \
+            "Auth URL state parameter must be the CSRF token"
+
+        # 3. Callback with a *different* state must fail even with correct verifier
+        mock_token_resp = httpx.Response(
+            200,
+            json={"access_token": "mock-token", "token_type": "Bearer"},
+        )
+        with patch("httpx.post", return_value=mock_token_resp):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state=attacker-controlled-state&code_verifier={code_verifier}"
+            )
+        assert response.status_code == 400
+
+        # 4. Callback with the correct csrf_state succeeds (token exchange mocked)
+        mock_userinfo_resp = httpx.Response(
+            200,
+            json={"email": "csrf@example.com", "name": "CSRF", "sub": "sub-csrf"},
+        )
+        with patch("httpx.post", return_value=mock_token_resp), \
+             patch("httpx.get", return_value=mock_userinfo_resp):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state={csrf_state}&code_verifier={code_verifier}"
+            )
+        assert response.status_code == 200

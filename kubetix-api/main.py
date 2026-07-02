@@ -481,14 +481,14 @@ async def sso_callback(
         )
 
     # CSRF state + PKCE verification
-    auth_code_id = request.query_params.get("state", "")
+    received_state = request.query_params.get("state", "")
     code_verifier = request.query_params.get("code_verifier", "")
-    if not auth_code_id or not code_verifier:
+    if not received_state or not code_verifier:
         raise HTTPException(
             status_code=400,
             detail="Missing required parameters: state and code_verifier",
         )
-    if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
+    if not _verify_auth_code(db, received_state, code_verifier):
         raise HTTPException(
             status_code=400, detail="Invalid or expired authorization state"
         )
@@ -652,7 +652,7 @@ async def sso_login(
         "scope": cfg["scope"],
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "state": auth_code_id,
+        "state": csrf_state,
     }
 
     auth_url = f"{cfg['auth_url']}?{urllib.parse.urlencode(params)}"
@@ -661,6 +661,7 @@ async def sso_login(
         "provider": provider,
         "auth_url": auth_url,
         "code_verifier": code_verifier,
+        "csrf_state": csrf_state,
         "message": "Redirect user to auth_url; store code_verifier for the callback",
     }
 
@@ -686,14 +687,14 @@ async def oidc_callback(
             detail="OIDC not configured. Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET",
         )
 
-    auth_code_id = request.query_params.get("state", "")
+    received_state = request.query_params.get("state", "")
     code_verifier = request.query_params.get("code_verifier", "")
-    if not auth_code_id or not code_verifier:
+    if not received_state or not code_verifier:
         raise HTTPException(
             status_code=400,
             detail="Missing required parameters: state and code_verifier",
         )
-    if not _verify_auth_code(db, auth_code_id, auth_code_id, code_verifier):
+    if not _verify_auth_code(db, received_state, code_verifier):
         raise HTTPException(
             status_code=400, detail="Invalid or expired authorization state"
         )
@@ -775,7 +776,7 @@ async def oidc_login(
         "scope": "openid profile email",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "state": auth_code_id,
+        "state": csrf_state,
     }
 
     auth_url = f"{oidc_issuer.rstrip('/')}/authorize?{urllib.parse.urlencode(params)}"
@@ -783,6 +784,7 @@ async def oidc_login(
     return {
         "auth_url": auth_url,
         "code_verifier": code_verifier,
+        "csrf_state": csrf_state,
         "message": "Redirect user to auth_url; store code_verifier for the callback",
     }
 
