@@ -121,3 +121,20 @@ jobs:
     - name: Template Helm chart
       run: |
         helm template kubetix-test ./charts/kubetix > /dev/null
+
+  directory-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+    - name: Check for unescaped braces in directory names
+      run: |
+        # Fail if any directory name contains literal { or } characters
+        # These are typically left over from failed brace expansion
+        found=$(find . -type d -name '*{*}' -o -type d -name '*}*')
+        if [ -n "$found" ]; then
+          echo "ERROR: Found directories with unescaped braces:"
+          echo "$found"
+          exit 1
+        fi
