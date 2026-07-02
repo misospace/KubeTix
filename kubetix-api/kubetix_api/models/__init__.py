@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    ForeignKey,
     String,
     Text,
     UniqueConstraint,
@@ -41,7 +42,7 @@ class Team(Base):  # noqa: N801
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    created_by = Column(String(36), nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -50,8 +51,8 @@ class TeamMember(Base):  # noqa: N801
     __tablename__ = "team_members"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    team_id = Column(String(36), nullable=False)
-    user_id = Column(String(36), nullable=False)
+    team_id = Column(String(36), ForeignKey("teams.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     role = Column(String(50), nullable=False)  # owner, admin, member
     joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -80,7 +81,7 @@ class Grant(Base):  # noqa: N801
     __tablename__ = "grants"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     cluster_name = Column(String(255), nullable=False)
     namespace = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False)
@@ -95,8 +96,8 @@ class AuditLog(Base):  # noqa: N801
     __tablename__ = "audit_log"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
-    user_id = Column(String(36), nullable=False)
-    grant_id = Column(String(36), nullable=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    grant_id = Column(String(36), ForeignKey("grants.id"), nullable=True)
     action = Column(String(50), nullable=False)
     details = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
