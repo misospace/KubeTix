@@ -22,13 +22,16 @@ _ENCRYPTION_KEY = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or None
 
 
 def _get_fernet() -> Fernet:
-    """Return a Fernet instance using the configured or generated key."""
+    """Return a Fernet instance.
+
+    Raises ValueError if KUBECONFIG_ENCRYPTION_KEY is not set, because an
+    ephemeral key would cause silent data loss on every API restart.
+    """
     key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
     if not key:
-        key = Fernet.generate_key().decode()
-        logging.warning(
-            "KubeTix: no KUBECONFIG_ENCRYPTION_KEY set. Generated ephemeral key — "
-            "existing grants will fail to decrypt after restart."
+        raise ValueError(
+            "KUBECONFIG_ENCRYPTION_KEY must be set; without it encrypted "
+            "kubeconfig grants become undecryptable after every restart."
         )
     return Fernet(key.encode())
 
