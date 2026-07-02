@@ -85,7 +85,15 @@ async function apiLogin(email: string, password: string): Promise<AuthToken> {
   return resp.data
 }
 
-async function apiLogout(): Promise<void> {
+async function apiLogout(token?: string): Promise<void> {
+  const apiUrl = getApiUrl()
+  if (apiUrl && token) {
+    try {
+      await axios.post(`${apiUrl}/auth/logout`, {}, { headers: { Authorization: `Bearer ${token}` } })
+    } catch {
+      // Best-effort: proceed with local cleanup even if server call fails
+    }
+  }
   clearToken()
 }
 
@@ -218,7 +226,8 @@ export default function Home() {
   }
 
   const handleLogout = async () => {
-    await apiLogout()
+    const token = getToken()
+    await apiLogout(token ?? undefined)
     setIsLoggedIn(false)
     setCurrentUser(null)
     setGrants([])
