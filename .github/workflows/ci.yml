@@ -135,6 +135,6 @@ jobs:
         found=$(find . -type d -name '*{*}' -o -type d -name '*}*')
         if [ -n "$found" ]; then
           echo "ERROR: Found directories with unescaped braces:"
-          echo "$found"
+          echo "${found}"
           exit 1
         fi
