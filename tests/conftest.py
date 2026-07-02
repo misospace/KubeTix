@@ -27,6 +27,11 @@ from _shared_db import engine, TestingSessionLocal, override_get_db
 # Fernet encryption helper for tests that need to create encrypted kubeconfig grants
 from cryptography.fernet import Fernet
 
+# Set a stable test encryption key so encrypted grants can be decrypted across restarts
+_TEST_ENCRYPTION_KEY = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or Fernet.generate_key().decode()
+if "KUBECONFIG_ENCRYPTION_KEY" not in os.environ:
+    os.environ["KUBECONFIG_ENCRYPTION_KEY"] = _TEST_ENCRYPTION_KEY
+
 
 def _fernet_encrypt(data: str) -> str:
     """Encrypt data using Fernet symmetric encryption (key from env)."""
