@@ -1,6 +1,7 @@
 """Authentication helpers — password hashing, JWT tokens, user resolution."""
 
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -33,8 +34,32 @@ def get_password_hash(password: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Token blacklist (in-memory; survives within a single process lifetime)
+# ---------------------------------------------------------------------------
+
+_TOKEN_BLACKLIST: dict[str, datetime] = {}
+
+
+def blacklist_token(jti: str, expires_at: datetime) -> None:
+    """Add a token jti to the blacklist until it would have expired."""
+    _TOKEN_BLACKLIST[jti] = expires_at
+
+
+def is_blacklisted(jti: str) -> bool:
+    """Check whether a token jti is blacklisted and not yet expired."""
+    exp = _TOKEN_BLACKLIST.get(jti)
+    if exp is None:
+        return False
+    if datetime.now(timezone.utc) >= exp:
+        del _TOKEN_BLACKLIST[jti]
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # JWT helpers
 # ---------------------------------------------------------------------------
+
 
 def create_access_token(
     data: dict,
@@ -42,13 +67,14 @@ def create_access_token(
 ) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "jti": secrets.token_urlsafe(16)})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 # ---------------------------------------------------------------------------
 # Current-user dependency
 # ---------------------------------------------------------------------------
+
 
 def get_current_user(
     authorization: str = Header(None),
@@ -66,6 +92,13 @@ def get_current_user(
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jti: str | None = payload.get("jti")
+        if jti and is_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         email: str = payload.get("sub")
         if email is None:
             raise HTTPException(
@@ -89,3 +122,23 @@ def get_current_user(
         )
 
     return user
+
+
+def decode_token(token: str) -> dict:
+    """Decode a JWT token and return its payload. Raises HTTPException on failure."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jti: str | None = payload.get("jti")
+        if jti and is_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

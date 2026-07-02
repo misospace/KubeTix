@@ -52,3 +52,9 @@ Thumbs.db
 *.db
 kubetix.db
 node_modules/
+
+# Next.js build output
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+package-lock.json.bak

@@ -13,12 +13,12 @@ All business logic lives in sub-packages:
 
 import os
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 import secrets
 
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response, status
 
 # ---------------------------------------------------------------------------
 # Rate limiting (optional)
@@ -144,6 +144,7 @@ from kubetix_api.auth import (  # noqa: E402
     create_access_token,
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    decode_token,
 )  # noqa: E402
 from kubetix_api.models import (  # noqa: E402,F401
     Base,
@@ -235,6 +236,31 @@ async def login(
         "token_type": "bearer",
         "user": user,
     }
+
+
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("10 per minute")
+async def logout(
+    request: Request,
+    authorization: str = Header(None),
+):
+    """Blacklist the current JWT so it cannot be reused."""
+    from kubetix_api.auth import blacklist_token
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No authentication token provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = authorization[7:]
+    payload = decode_token(token)
+    jti: str | None = payload.get("jti")
+    exp_raw: int | None = payload.get("exp")
+    if jti and exp_raw is not None:
+        expires_at = datetime.fromtimestamp(exp_raw, tz=timezone.utc)
+        blacklist_token(jti, expires_at)
 
 
 @app.get("/users/me", response_model=UserResponse)
