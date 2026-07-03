@@ -16,6 +16,11 @@ from fastapi.testclient import TestClient
 # Ensure kubetix-api is on the path
 sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
 
+# Required by _get_fernet() — tests use a fixed key so encrypted grants are
+# decryptable across test runs.  Individual tests may override or delete this
+# via monkeypatch when they need to exercise the "key not set" path.
+os.environ.setdefault("KUBECONFIG_ENCRYPTION_KEY", "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso=")
+
 from main import app, Base, get_db, User, get_password_hash
 from _shared_db import engine, TestingSessionLocal, override_get_db
 

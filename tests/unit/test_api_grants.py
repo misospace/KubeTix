@@ -13,6 +13,8 @@ from sqlalchemy.pool import StaticPool
 from _shared_db import engine, TestingSessionLocal
 import secrets
 import os
+
+os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
 import tempfile
 
 # Import the main app
@@ -428,6 +430,18 @@ class TestDownloadGrants:
         
         assert response.status_code == 400
         assert "expired" in response.json()["detail"].lower()
+
+
+class TestEncryptionKeyRequired:
+    """Tests that KUBECONFIG_ENCRYPTION_KEY is required."""
+
+    def test_get_fernet_raises_when_key_not_set(self, monkeypatch):
+        """Test that _get_fernet raises ValueError when key is not configured."""
+        from kubetix_api.grants import _get_fernet
+
+        monkeypatch.delenv("KUBECONFIG_ENCRYPTION_KEY", raising=False)
+        with pytest.raises(ValueError, match="KUBECONFIG_ENCRYPTION_KEY must be set"):
+            _get_fernet()
 
 
 if __name__ == "__main__":
