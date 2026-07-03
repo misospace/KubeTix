@@ -638,7 +638,7 @@ async def sso_login(
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = secrets.token_urlsafe(32)
 
-    auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, provider)
+    _create_auth_code_record(db, code_challenge, csrf_state, provider)
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
@@ -767,7 +767,7 @@ async def oidc_login(
     code_verifier, code_challenge = _generate_pkce_params()
     csrf_state = __import__("secrets").token_urlsafe(32)
 
-    auth_code_id = _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
+    _create_auth_code_record(db, code_challenge, csrf_state, "oidc")
 
     params = {
         "client_id": oidc_client_id,
