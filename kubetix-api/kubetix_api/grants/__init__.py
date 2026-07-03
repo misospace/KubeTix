@@ -18,8 +18,6 @@ from kubetix_api.schemas import GrantCreate, GrantResponse, GrantWithKubeconfig
 # Encryption helper
 # ---------------------------------------------------------------------------
 
-_ENCRYPTION_KEY = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or None
-
 
 def _get_fernet() -> Fernet:
     """Return a Fernet instance.
@@ -27,7 +25,7 @@ def _get_fernet() -> Fernet:
     Raises ValueError if KUBECONFIG_ENCRYPTION_KEY is not set, because an
     ephemeral key would cause silent data loss on every API restart.
     """
-    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY") or _ENCRYPTION_KEY
+    key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
     if not key:
         raise ValueError(
             "KUBECONFIG_ENCRYPTION_KEY must be set; without it encrypted "
