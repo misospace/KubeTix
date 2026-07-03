@@ -85,10 +85,8 @@ def _create_auth_code_record(
 ) -> str:
     """Persist PKCE challenge + CSRF state; returns the auth_code id.
 
-    The record's own id (a random token) is stored in the `state` column
-    because that is what the auth URL sends to the IdP as the `state` parameter.
-    The caller-passed `state` (csrf_state) is retained for backward compatibility
-    but is not written to the DB — the IdP echoes back the record id, not it.
+    The caller-passed `state` (csrf_state) is stored in the DB and must be
+    echoed back by the IdP for CSRF verification on callback.
     """
     from kubetix_api.models import AuthCode
 
@@ -97,7 +95,7 @@ def _create_auth_code_record(
     record = AuthCode(
         id=auth_code_id,
         code_challenge=code_challenge,
-        state=auth_code_id,
+        state=state,
         provider=provider,
         expires_at=expires_at,
     )
@@ -109,18 +107,20 @@ def _create_auth_code_record(
 
 def _verify_auth_code(
     db,
-    auth_code_id: str,
     received_state: str,
     code_verifier: str,
 ) -> bool:
-    """Verify state match + PKCE challenge, mark used, return True on success."""
+    """Verify CSRF state + PKCE challenge, mark used, return True on success.
+
+    Looks up the AuthCode record by its stored `state` field (the CSRF token
+    echoed back by the IdP), then verifies the PKCE code verifier.
+    """
     from kubetix_api.models import AuthCode
 
     now = datetime.now(timezone.utc)
     record = db.query(AuthCode).filter(
-        AuthCode.id == auth_code_id,
-        AuthCode.used == False,
         AuthCode.state == received_state,
+        AuthCode.used == False,
         AuthCode.expires_at > now,
     ).first()
     if record is None:
