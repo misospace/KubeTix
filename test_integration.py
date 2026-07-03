@@ -152,7 +152,7 @@ users:
 
         # Revoke it
         result = subprocess.run(
-            [sys.executable, "kc-share.py", "revoke", grant_id],
+            [sys.executable, "kc-share.py", "revoke", "--", grant_id],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent,
@@ -190,7 +190,7 @@ users:
 
         # Download it
         result = subprocess.run(
-            [sys.executable, "kc-share.py", "download", grant_id],
+            [sys.executable, "kc-share.py", "download", "--", grant_id],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent,
@@ -252,9 +252,10 @@ users:
                     sys.executable,
                     "kc-share.py",
                     "download",
-                    grant_id,
                     "--output",
                     output_path,
+                    "--",
+                    grant_id,
                 ],
                 capture_output=True,
                 text=True,
