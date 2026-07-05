@@ -520,7 +520,9 @@ async def sso_callback(
 
     if resp.status_code != 200:
         raise HTTPException(
-            status_code=401, detail="Failed to exchange authorization code for token"
+            status_code=401,
+            detail=f"Failed to exchange authorization code for token "
+            f"(provider returned {resp.status_code}: {resp.text[:500]})",
         )
 
     token_data = resp.json()
@@ -538,7 +540,9 @@ async def sso_callback(
     userinfo_resp = httpx.get(cfg["userinfo_url"], headers=headers, timeout=10)
     if userinfo_resp.status_code != 200:
         raise HTTPException(
-            status_code=401, detail="Failed to fetch user information from provider"
+            status_code=401,
+            detail=f"Failed to fetch user information from provider "
+            f"(provider returned {userinfo_resp.status_code}: {userinfo_resp.text[:500]})",
         )
 
     userinfo = userinfo_resp.json()
@@ -703,9 +707,10 @@ async def oidc_callback(
         token_data = _exchange_code_for_tokens(
             oidc_issuer, oidc_client_id, oidc_client_secret, code, oidc_redirect_uri
         )
-    except Exception:
+    except Exception as e:
         raise HTTPException(
-            status_code=401, detail="Failed to exchange authorization code for token"
+            status_code=401,
+            detail=f"Failed to exchange authorization code for token: {e}",
         )
 
     access_token = token_data.get("access_token")
@@ -716,10 +721,10 @@ async def oidc_callback(
 
     try:
         userinfo = _get_userinfo(issuer=oidc_issuer, access_token=access_token)
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=401,
-            detail="Failed to fetch user information from OIDC provider",
+            detail=f"Failed to fetch user information from OIDC provider: {e}",
         )
 
     email = userinfo.get("email")
