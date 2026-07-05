@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "kubetix-api"))
 from main import app, Base, get_db, User, Grant, get_password_hash, create_access_token
 from cryptography.fernet import Fernet
 
+
 # Fernet encryption helper for creating test encrypted kubeconfig grants
 def _fernet_encrypt(data: str) -> str:
     key = os.environ.get("KUBECONFIG_ENCRYPTION_KEY")
@@ -32,31 +33,41 @@ def _fernet_encrypt(data: str) -> str:
         raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
     return Fernet(key.encode()).encrypt(data.encode()).decode()
 
+
 # Test database (in-memory SQLite)
 _TEST_DB_URL = f"sqlite:///:memory:?dbname=download_grant_{secrets.token_hex(4)}"
-_engine = create_engine(_TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+_engine = create_engine(
+    _TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool
+)
 _TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
-
 
 
 class TestDownloadGrant:
     """Tests for downloading grants."""
-    
+
     def test_download_grant_success(self, client, db, auth_headers, monkeypatch):
-        kubeconfig_content = "apiVersion: v1\nkind: Config\nclusters:\n  - name: test-cluster\n"
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        kubeconfig_content = (
+            "apiVersion: v1\nkind: Config\nclusters:\n  - name: test-cluster\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write(kubeconfig_content)
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         encrypted = _fernet_encrypt(kubeconfig_content)
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="test-cluster", namespace="default", role="view",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="test-cluster",
+            namespace="default",
+            role="view",
             encrypted_kubeconfig=encrypted,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         grant_id = grant.id
         response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
@@ -68,132 +79,182 @@ class TestDownloadGrant:
         assert data["namespace"] == "default"
         assert "kubeconfig" in data
         assert "apiVersion" in data["kubeconfig"]
-    
+
     def test_download_grant_not_found(self, client, auth_headers):
-        response = client.get("/grants/nonexistent-id-12345/download", headers=auth_headers)
+        response = client.get(
+            "/grants/nonexistent-id-12345/download", headers=auth_headers
+        )
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
-    
+
     def test_download_grant_wrong_user(self, client, db, other_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         test_user = User(
             id=secrets.token_urlsafe(16),
-            email="test@example.com", hashed_password=get_password_hash("testpassword123")
+            email="test@example.com",
+            hashed_password=get_password_hash("testpassword123"),
         )
-        db.add(test_user); db.commit()
+        db.add(test_user)
+        db.commit()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=test_user.id,
-            cluster_name="other-cluster", namespace="production", role="admin",
+            id=secrets.token_urlsafe(16),
+            user_id=test_user.id,
+            cluster_name="other-cluster",
+            namespace="production",
+            role="admin",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         grant_id = grant.id
         response = client.get(f"/grants/{grant_id}/download", headers=other_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 403
         assert "not authorized" in response.json()["detail"].lower()
-    
+
     def test_download_revoked_grant(self, client, db, auth_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="revoked-cluster", namespace="default", role="view",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="revoked-cluster",
+            namespace="default",
+            role="view",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1), revoked=True
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            revoked=True,
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 400
         assert "revoked" in response.json()["detail"].lower()
-    
+
     def test_download_expired_grant(self, client, db, auth_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="expired-cluster", namespace="default", role="view",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="expired-cluster",
+            namespace="default",
+            role="view",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) - timedelta(hours=1)
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 400
         assert "expired" in response.json()["detail"].lower()
-    
+
     def test_download_grant_unauthorized(self, client):
         response = client.get("/grants/some-id/download")
         assert response.status_code == 401
-    
+
     def test_download_grant_with_namespace(self, client, db, auth_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="ns-cluster", namespace="production", role="edit",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="ns-cluster",
+            namespace="production",
+            role="edit",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
         assert data["namespace"] == "production"
         assert data["role"] == "edit"
-    
+
     def test_download_grant_admin_role(self, client, db, auth_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="admin-cluster", namespace="kube-system", role="admin",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="admin-cluster",
+            namespace="kube-system",
+            role="admin",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
         assert data["role"] == "admin"
-    
-    def test_download_grant_response_fields(self, client, db, auth_headers, monkeypatch):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.kubeconfig', delete=False) as f:
+
+    def test_download_grant_response_fields(
+        self, client, db, auth_headers, monkeypatch
+    ):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
             f.write("apiVersion: v1\nkind: Config\n")
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         user = db.query(User).filter(User.email == "test@example.com").first()
         grant = Grant(
-            id=secrets.token_urlsafe(16), user_id=user.id,
-            cluster_name="fields-cluster", namespace="default", role="view",
+            id=secrets.token_urlsafe(16),
+            user_id=user.id,
+            cluster_name="fields-cluster",
+            namespace="default",
+            role="view",
             encrypted_kubeconfig=_fernet_encrypt("apiVersion: v1\nkind: Config\n"),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
-        db.add(grant); db.commit()
+        db.add(grant)
+        db.commit()
         response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
-        expected_fields = {"id", "cluster_name", "namespace", "role", "expires_at", "kubeconfig"}
+        expected_fields = {
+            "id",
+            "cluster_name",
+            "namespace",
+            "role",
+            "expires_at",
+            "kubeconfig",
+        }
         for field in expected_fields:
             assert field in data, f"Missing field: {field}"
 

@@ -7,23 +7,37 @@ from sqlalchemy import and_
 
 from kubetix_api.database import get_db
 from kubetix_api.models import Team, TeamMember, User, provision_user
-from kubetix_api.schemas import TeamCreate, TeamResponse, TeamMemberCreate, TeamMemberResponse
+from kubetix_api.schemas import (
+    TeamCreate,
+    TeamResponse,
+    TeamMemberCreate,
+    TeamMemberResponse,
+)
 
 
 def _is_team_member(db, team_id: str, user_id: str) -> bool:
     """Check if a user is a member of a team."""
-    return db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == user_id,
-    ).first() is not None
+    return (
+        db.query(TeamMember)
+        .filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == user_id,
+        )
+        .first()
+        is not None
+    )
 
 
 def _is_team_owner_or_admin(db, team_id: str, user_id: str) -> bool:
     """Check if a user is an owner or admin of a team."""
-    member = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == user_id,
-    ).first()
+    member = (
+        db.query(TeamMember)
+        .filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == user_id,
+        )
+        .first()
+    )
     return member is not None and member.role in ("owner", "admin")
 
 
@@ -58,13 +72,22 @@ def create_team(
 
 def list_teams(current_user: User, db) -> List[TeamResponse]:
     """List all teams the user is a member of."""
-    team_ids = db.query(TeamMember.team_id).filter(
-        TeamMember.user_id == current_user.id,
-    ).subquery()
+    team_ids = (
+        db.query(TeamMember.team_id)
+        .filter(
+            TeamMember.user_id == current_user.id,
+        )
+        .subquery()
+    )
 
-    teams = db.query(Team).filter(
-        Team.id.in_(team_ids),
-    ).order_by(Team.created_at.desc()).all()
+    teams = (
+        db.query(Team)
+        .filter(
+            Team.id.in_(team_ids),
+        )
+        .order_by(Team.created_at.desc())
+        .all()
+    )
 
     return [TeamResponse.model_validate(t) for t in teams]
 
@@ -98,10 +121,14 @@ def add_team_member(
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    existing = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == target_user.id,
-    ).first()
+    existing = (
+        db.query(TeamMember)
+        .filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == target_user.id,
+        )
+        .first()
+    )
     if existing:
         raise HTTPException(
             status_code=400,
@@ -132,7 +159,9 @@ def remove_team_member(team_id: str, user_id: str, current_user: User, db) -> No
         )
 
     if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Cannot remove yourself from the team")
+        raise HTTPException(
+            status_code=400, detail="Cannot remove yourself from the team"
+        )
 
     db.query(TeamMember).filter(
         TeamMember.team_id == team_id,

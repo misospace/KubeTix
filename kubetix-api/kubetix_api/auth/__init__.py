@@ -16,7 +16,9 @@ from kubetix_api.models import User
 # Configuration
 # ---------------------------------------------------------------------------
 
-SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or __import__("secrets").token_urlsafe(32)
+SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or __import__(
+    "secrets"
+).token_urlsafe(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
@@ -24,6 +26,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 # ---------------------------------------------------------------------------
 # Password helpers
 # ---------------------------------------------------------------------------
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
