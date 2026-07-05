@@ -84,6 +84,8 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     from kubetix_api.database import init_db
+    from kubetix_api.cleanup import run_grant_cleanup_loop
+    import asyncio as _asyncio
     import os as _os
 
     # Populate CORS origins from the environment at startup, not at import.
@@ -91,6 +93,9 @@ async def lifespan(app: FastAPI):
     # a reference to this list) sees the resolved origins.
     ALLOWED_ORIGINS.clear()
     ALLOWED_ORIGINS.extend(_resolve_cors_origins())
+
+    _cleanup_stop = _asyncio.Event()
+    _cleanup_task = _asyncio.create_task(run_grant_cleanup_loop(_cleanup_stop))
 
     # Skip init_db in test mode — conftest handles table creation
     if not _os.environ.get("TESTING"):
@@ -127,7 +132,13 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
     yield
-    # Shutdown (no cleanup needed currently)
+    # Shutdown: signal background tasks to stop and wait for them.
+    _cleanup_stop.set()
+    try:
+        await _cleanup_task
+    except Exception:  # pragma: no cover - defensive logging
+        import logging as _logging
+        _logging.getLogger(__name__).exception("Grant cleanup task errored on shutdown")
 
 
 app = FastAPI(
