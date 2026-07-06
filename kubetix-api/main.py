@@ -529,7 +529,7 @@ async def sso_callback(
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
-        f"http://localhost:8000/auth/sso/callback?provider={provider}",
+        "http://localhost:8000/auth/sso/callback",
     )
 
     if provider == "github":
@@ -680,7 +680,7 @@ async def sso_login(
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
-        f"http://localhost:8000/auth/sso/callback?provider={provider}",
+        "http://localhost:8000/auth/sso/callback",
     )
 
     params = {
