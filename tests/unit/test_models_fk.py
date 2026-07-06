@@ -1,6 +1,6 @@
 """Regression test: verify foreign key constraints are defined on models.
 
-Fixes #139 – Missing foreign key constraints.
+Fixes #139, #171 – Missing foreign key constraints.
 """
 
 from kubetix_api.models import (
