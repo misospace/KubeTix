@@ -90,3 +90,35 @@ async def test_cleanup_loop_runs_once_and_stops(monkeypatch):
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
     assert calls["n"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_loop_survives_purge_errors(monkeypatch, caplog):
+    """A failing sweep must not kill the loop; subsequent sweeps still run."""
+    import asyncio
+    import logging
+    from kubetix_api import cleanup
+
+    state = {"n": 0, "raise_on": 1}
+
+    def flaky_purge(_factory):
+        state["n"] += 1
+        if state["n"] == state["raise_on"]:
+            raise RuntimeError("transient db error")
+        return 0
+
+    monkeypatch.setattr(cleanup, "purge_expired_grants", flaky_purge)
+    monkeypatch.setattr(cleanup, "DEFAULT_INTERVAL_SECONDS", 0)
+
+    stop = asyncio.Event()
+    with caplog.at_level(logging.ERROR, logger="kubetix_api.cleanup"):
+        task = asyncio.create_task(cleanup.run_grant_cleanup_loop(stop))
+        # Let the failing sweep happen, then a successful one.
+        await asyncio.sleep(0.1)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    # The loop must have run more than once (failure did not stop it).
+    assert state["n"] >= 2
+    # The failure was logged at ERROR level.
+    assert any("Expired-grant cleanup iteration failed" in r.message for r in caplog.records)
