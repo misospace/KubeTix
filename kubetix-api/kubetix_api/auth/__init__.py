@@ -20,7 +20,12 @@ SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or __import__(
     "secrets"
 ).token_urlsafe(32)
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+# Short-lived access token. There is no refresh token or revocation
+# mechanism beyond the in-memory blacklist, so the lifetime must remain
+# small enough that a stolen token has a limited blast radius.
+# 15 minutes is the conventional short-lived access token duration
+# (OWASP JWT cheat sheet).
+ACCESS_TOKEN_EXPIRE_MINUTES = 15  # 15 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +74,9 @@ def create_access_token(
     expires_delta: Optional[timedelta] = None,
 ) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire, "jti": secrets.token_urlsafe(16)})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
