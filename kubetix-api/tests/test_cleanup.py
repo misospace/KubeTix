@@ -1,4 +1,5 @@
 """Regression tests for expired-grant cleanup (issue #140)."""
+
 from unittest.mock import MagicMock
 
 from kubetix_api.cleanup import purge_expired_grants

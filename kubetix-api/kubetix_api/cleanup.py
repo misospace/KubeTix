@@ -11,6 +11,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from kubetix_api.database import SessionLocal
+from kubetix_api.models import Grant
+
 log = logging.getLogger(__name__)
 
 # Sweep every 1 hour by default. Override via GRANT_CLEANUP_INTERVAL_SECONDS.
@@ -25,8 +28,6 @@ async def run_grant_cleanup_loop(stop_event: asyncio.Event) -> None:
     interval = int(
         os.environ.get("GRANT_CLEANUP_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)
     )
-    # Local import to avoid circular dependency with database module at import time.
-    from kubetix_api.database import SessionLocal
 
     log.info("Expired-grant cleanup loop starting (interval=%ss)", interval)
     while not stop_event.is_set():
@@ -43,14 +44,12 @@ async def run_grant_cleanup_loop(stop_event: asyncio.Event) -> None:
     log.info("Expired-grant cleanup loop stopped")
 
 
-def purge_expired_grants(session_factory) -> int:
+def purge_expired_grants(session_factory=SessionLocal) -> int:
     """Delete grants whose ``expires_at`` is in the past.
 
     Returns the number of rows removed. ``session_factory`` is a callable
-    that returns a SQLAlchemy ``Session`` (matches ``SessionLocal``).
+    that returns a SQLAlchemy ``Session`` (defaults to ``SessionLocal``).
     """
-    from kubetix_api.models import Grant
-
     db: Session = session_factory()
     try:
         now = datetime.now(timezone.utc)

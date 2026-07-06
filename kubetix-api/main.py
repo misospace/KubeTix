@@ -138,6 +138,7 @@ async def lifespan(app: FastAPI):
         await _cleanup_task
     except Exception:  # pragma: no cover - defensive logging
         import logging as _logging
+
         _logging.getLogger(__name__).exception("Grant cleanup task errored on shutdown")
 
 

@@ -1,34 +1,28 @@
 """Regression tests for expired-grant cleanup (issue #140)."""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
 
 def test_purge_expired_grants_removes_only_expired(monkeypatch):
     """Expired grants are deleted; non-expired grants are kept."""
-    # Use an in-memory fake to avoid touching the real DB.
-    class FakeQuery:
-        def __init__(self, store):
-            self.store = store
-
-        def filter(self, _cond):
-            return self
-
-        def delete(self, synchronize_session=False):
-            now = datetime.now(timezone.utc)
-            kept = [g for g in self.store if g["expires_at"] >= now]
-            removed = len(self.store) - len(kept)
-            self.store.clear()
-            self.store.extend(kept)
-            return removed
 
     class FakeSession:
         def __init__(self, store):
             self.store = store
 
-        def query(self, _model):
-            return FakeQuery(self.store)
+        def query(self, model):
+            return self
+
+        def filter(self, _cond):
+            now = datetime.now(timezone.utc)
+            kept = [g for g in self.store if g["expires_at"] >= now]
+            removed = len(self.store) - len(kept)
+            self.store.clear()
+            self.store.extend(kept)
+            return MagicMock(delete=MagicMock(return_value=removed))
 
         def commit(self):
             pass
@@ -49,20 +43,10 @@ def test_purge_expired_grants_removes_only_expired(monkeypatch):
     def factory():
         return FakeSession(store)
 
-    # Import after the fake is set up so the model lookup resolves.
     from kubetix_api import cleanup
 
-    # Monkeypatch the Grant symbol the cleanup module imports lazily.
-    class _Grant:
-        pass
-
-    monkeypatch.setattr(cleanup, "Grant", _Grant, raising=False)
-    # The cleanup module does `from kubetix_api.models import Grant` lazily;
-    # ensure that name resolves to our stand-in as well.
-    import kubetix_api.models as _models
-    monkeypatch.setattr(_models, "Grant", _Grant, raising=False)
-
     deleted = cleanup.purge_expired_grants(factory)
+
     assert deleted == 2
     assert [g["id"] for g in store] == [2]
 
