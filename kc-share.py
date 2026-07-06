@@ -398,7 +398,26 @@ def main():
         "--output", "-o", default=None, help="Output file path (default: temp file)"
     )
 
+    # Sync command — push local grants to the API so CLI and API share state
+    sync_parser = subparsers.add_parser(
+        "sync", help="Push local grants to the KubeTix API"
+    )
+    sync_parser.add_argument(
+        "--api-url",
+        default=os.environ.get("KUBETIX_API_URL", "http://localhost:8000"),
+        help="KubeTix API base URL (default: $KUBETIX_API_URL or http://localhost:8000)",
+    )
+    sync_parser.add_argument(
+        "--token",
+        default=os.environ.get("KUBETIX_API_TOKEN"),
+        help="Bearer token for the API (default: $KUBETIX_API_TOKEN)",
+    )
+
     args = parser.parse_args()
+
+    if args.command == "sync":
+        sync_to_api(api_url=args.api_url, token=args.token)
+        return
 
     if args.command == "create":
         grant_id = create_grant(args.cluster, args.namespace, args.role, args.expiry)
@@ -452,6 +471,101 @@ def main():
 
     else:
         parser.print_help()
+
+
+def sync_to_api(api_url: str, token: Optional[str]) -> None:
+    """Push locally stored grants to the KubeTix API.
+
+    The CLI and API historically maintained independent databases and
+    independent encryption keys, which meant a grant created by the CLI
+    was invisible to the API and vice versa (issue #162). This function
+    bridges the silo by POSTing every active, non-revoked grant to the
+    API's /grants endpoint, reusing the CLI's existing Fernet encryption
+    so the API can decrypt the kubeconfig with the shared key.
+
+    Each successfully synced grant produces an audit_log entry for
+    compliance and forensics.
+    """
+    try:
+        import urllib.request
+        import urllib.error
+    except ImportError:  # pragma: no cover - stdlib always present
+        raise
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, cluster_name, namespace, role, created_at, expires_at, "
+        "revoked, metadata, encrypted_kubeconfig FROM grants WHERE revoked = 0"
+    )
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("No grants to sync")
+        conn.close()
+        return
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    synced_ids = []
+    failed = 0
+    for row in rows:
+        (
+            grant_id,
+            cluster_name,
+            namespace,
+            role,
+            created_at,
+            expires_at,
+            revoked,
+            metadata,
+            encrypted_kubeconfig,
+        ) = row
+        payload = {
+            "id": grant_id,
+            "cluster_name": cluster_name,
+            "namespace": namespace,
+            "role": role,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "revoked": bool(revoked),
+            "metadata": metadata,
+            "encrypted_kubeconfig": encrypted_kubeconfig,
+        }
+        url = api_url.rstrip("/") + f"/grants/{grant_id}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if 200 <= resp.status < 300:
+                    synced_ids.append(grant_id)
+                else:
+                    failed += 1
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            failed += 1
+
+    # Write audit_log entries for all successfully synced grants
+    for grant_id in synced_ids:
+        cursor.execute(
+            "INSERT INTO audit_log (id, grant_id, action, details) VALUES (?, ?, ?, ?)",
+            (
+                secrets.token_urlsafe(8),
+                grant_id,
+                "synced_to_api",
+                f"Synced grant to {api_url}",
+            ),
+        )
+
+    conn.commit()
+    conn.close()
+
+    print(f"✅ Synced {len(synced_ids)} grant(s) to {api_url} ({failed} failed)")
 
 
 if __name__ == "__main__":
