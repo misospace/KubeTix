@@ -454,3 +454,169 @@ class TestSSORoundTrip:
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
         assert response.status_code == 200
+
+
+class TestSSOErrorHandling:
+    """Regression tests for issue #150: SSO error handling must include provider details."""
+
+    def test_sso_callback_token_exchange_error_includes_provider_details(
+        self, client, db, mock_google_sso_env, monkeypatch
+    ):
+        """Token exchange failure must include the provider's HTTP status code and response body."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login — get csrf_state and code_verifier
+        response = client.get("/auth/sso/google/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+        csrf_state = login_data["csrf_state"]
+
+        # 2. Mock token exchange to return an error from the provider
+        mock_token_resp = httpx.Response(
+            403,
+            json={"error": "access_denied", "error_description": "User denied access"},
+        )
+        with patch("httpx.post", return_value=mock_token_resp):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state={csrf_state}&code_verifier={code_verifier}"
+            )
+
+        assert response.status_code == 401
+        detail = response.json()["detail"]
+        # Verify provider status code is included
+        assert "403" in detail, (
+            f"Error message should include provider status code: {detail}"
+        )
+        # Verify provider error body is included
+        assert "access_denied" in detail or "User denied access" in detail, (
+            f"Error message should include provider response body: {detail}"
+        )
+
+    def test_sso_callback_userinfo_error_includes_provider_details(
+        self, client, db, mock_google_sso_env, monkeypatch
+    ):
+        """Userinfo fetch failure must include the provider's HTTP status code and response body."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login — get csrf_state and code_verifier
+        response = client.get("/auth/sso/google/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+        csrf_state = login_data["csrf_state"]
+
+        # 2. Mock token exchange to succeed, but userinfo to fail
+        mock_token_resp = httpx.Response(
+            200,
+            json={"access_token": "mock-token", "token_type": "Bearer"},
+        )
+        mock_userinfo_resp = httpx.Response(
+            500,
+            text="Internal Server Error",
+        )
+
+        def mock_request(method, url, **kwargs):
+            if method == "POST":
+                return mock_token_resp
+            elif method == "GET":
+                return mock_userinfo_resp
+            raise ValueError(f"Unexpected method: {method}")
+
+        with patch("httpx.post", side_effect=lambda *a, **kw: mock_request("POST", *a, **kw)), \
+             patch("httpx.get", side_effect=lambda *a, **kw: mock_request("GET", *a, **kw)):
+            response = client.post(
+                "/auth/sso/callback?provider=google&code=fake-code"
+                f"&state={csrf_state}&code_verifier={code_verifier}"
+            )
+
+        assert response.status_code == 401
+        detail = response.json()["detail"]
+        # Verify provider status code is included
+        assert "500" in detail, (
+            f"Error message should include provider status code: {detail}"
+        )
+        # Verify provider error body is included
+        assert "Internal Server Error" in detail, (
+            f"Error message should include provider response body: {detail}"
+        )
+
+    def test_oidc_callback_token_exchange_error_includes_provider_details(
+        self, client, db, mock_oidc_env, monkeypatch
+    ):
+        """OIDC token exchange failure must include the provider's error details."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login — get csrf_state and code_verifier
+        response = client.get("/auth/oidc/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+        csrf_state = login_data["csrf_state"]
+
+        # 2. Mock token exchange to raise an HTTPStatusError (as _exchange_code_for_tokens does)
+        def mock_post(*args, **kwargs):
+            resp = httpx.Response(401, json={"error": "invalid_grant"})
+            resp.request = httpx.Request("POST", args[0] if args else "/token")
+            resp.raise_for_status()
+            return resp
+
+        with patch("httpx.post", side_effect=mock_post):
+            response = client.post(
+                "/auth/oidc/callback?code=fake-code"
+                f"&state={csrf_state}&code_verifier={code_verifier}"
+            )
+
+        assert response.status_code == 401
+        detail = response.json()["detail"]
+        # Verify the exception message (which includes provider details) is in the error
+        assert "invalid_grant" in detail or "401" in detail, (
+            f"Error message should include provider error details: {detail}"
+        )
+
+    def test_oidc_callback_userinfo_error_includes_provider_details(
+        self, client, db, mock_oidc_env, monkeypatch
+    ):
+        """OIDC userinfo fetch failure must include the provider's error details."""
+        import httpx
+        from unittest.mock import patch
+
+        # 1. Initiate login — get csrf_state and code_verifier
+        response = client.get("/auth/oidc/login")
+        assert response.status_code == 200
+        login_data = response.json()
+        code_verifier = login_data["code_verifier"]
+        csrf_state = login_data["csrf_state"]
+
+        # 2. Mock token exchange to succeed, but userinfo to raise an error
+        def mock_post(*args, **kwargs):
+            resp = httpx.Response(
+                200,
+                json={"access_token": "mock-token", "token_type": "Bearer"},
+            )
+            resp.request = httpx.Request("POST", args[0] if args else "/token")
+            return resp
+
+        def mock_get(*args, **kwargs):
+            resp = httpx.Response(503, text="Service Unavailable")
+            resp.request = httpx.Request("GET", args[0] if args else "/userinfo")
+            resp.raise_for_status()
+            return resp
+
+        with patch("httpx.post", side_effect=mock_post), \
+             patch("httpx.get", side_effect=mock_get):
+            response = client.post(
+                "/auth/oidc/callback?code=fake-code"
+                f"&state={csrf_state}&code_verifier={code_verifier}"
+            )
+
+        assert response.status_code == 401
+        detail = response.json()["detail"]
+        # Verify the exception message (which includes provider details) is in the error
+        assert "503" in detail or "Service Unavailable" in detail, (
+            f"Error message should include provider error details: {detail}"
+        )
