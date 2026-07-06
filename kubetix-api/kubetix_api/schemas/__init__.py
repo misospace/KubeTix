@@ -6,7 +6,6 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -33,9 +32,7 @@ def _is_valid_email(value: str) -> str:
     if not value or len(value) > 254:
         raise ValueError("Email must be between 1 and 254 characters")
     if not _EMAIL_RE.match(value):
-        raise ValueError(
-            "Invalid email format. Example: user@example.com"
-        )
+        raise ValueError("Invalid email format. Example: user@example.com")
     # Reject consecutive dots
     if ".." in value:
         raise ValueError("Email must not contain consecutive dots")
@@ -45,9 +42,7 @@ def _is_valid_email(value: str) -> str:
 def _is_valid_k8s_name(value: str) -> str:
     """Validate Kubernetes DNS subdomain name (RFC 1123)."""
     if not value or len(value) > 253:
-        raise ValueError(
-            "Name must be between 1 and 253 characters"
-        )
+        raise ValueError("Name must be between 1 and 253 characters")
     if not _K8S_NAME_RE.match(value):
         raise ValueError(
             "Name must contain only lowercase letters, numbers, and hyphens. "
@@ -66,6 +61,7 @@ def _is_valid_password(value: str) -> str:
 # ---------------------------------------------------------------------------
 # User schemas
 # ---------------------------------------------------------------------------
+
 
 class UserCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -116,6 +112,7 @@ class UserResponse(BaseModel):
 # Grant schemas
 # ---------------------------------------------------------------------------
 
+
 class GrantCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,9 +137,7 @@ class GrantCreate(BaseModel):
     @classmethod
     def validate_role(cls, v: str) -> str:
         if v not in _GRANT_ROLES:
-            raise ValueError(
-                f"Role must be one of: {', '.join(sorted(_GRANT_ROLES))}"
-            )
+            raise ValueError(f"Role must be one of: {', '.join(sorted(_GRANT_ROLES))}")
         return v
 
     @field_validator("expiry_hours")
@@ -180,6 +175,7 @@ class GrantWithKubeconfig(BaseModel):
 # Auth schemas
 # ---------------------------------------------------------------------------
 
+
 class Token(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -191,6 +187,7 @@ class Token(BaseModel):
 # ---------------------------------------------------------------------------
 # Team schemas
 # ---------------------------------------------------------------------------
+
 
 class TeamCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)

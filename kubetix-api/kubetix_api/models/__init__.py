@@ -22,6 +22,7 @@ Base = declarative_base()
 # ORM Models
 # ---------------------------------------------------------------------------
 
+
 class User(Base):  # noqa: N801
     __tablename__ = "users"
 
@@ -33,7 +34,11 @@ class User(Base):  # noqa: N801
     sso_provider = Column(String(50), nullable=True)
     sso_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Team(Base):  # noqa: N801
@@ -44,7 +49,11 @@ class Team(Base):  # noqa: N801
     description = Column(Text)
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class TeamMember(Base):  # noqa: N801
@@ -56,9 +65,7 @@ class TeamMember(Base):  # noqa: N801
     role = Column(String(50), nullable=False)  # owner, admin, member
     joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        UniqueConstraint("team_id", "user_id", name="uq_team_user"),
-    )
+    __table_args__ = (UniqueConstraint("team_id", "user_id", name="uq_team_user"),)
 
 
 class AuthCode(Base):  # noqa: N801
@@ -66,6 +73,7 @@ class AuthCode(Base):  # noqa: N801
 
     Records expire after 10 minutes and are marked used on successful callback.
     """
+
     __tablename__ = "auth_codes"
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
@@ -89,7 +97,11 @@ class Grant(Base):  # noqa: N801
     expires_at = Column(DateTime, nullable=False)
     revoked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class AuditLog(Base):  # noqa: N801
@@ -106,6 +118,7 @@ class AuditLog(Base):  # noqa: N801
 # ---------------------------------------------------------------------------
 # Helpers that depend on ORM models (used by auth/oidc modules)
 # ---------------------------------------------------------------------------
+
 
 def get_user_by_email(db: Session, email: str) -> "User | None":
     """Convenience: look up a user by email."""

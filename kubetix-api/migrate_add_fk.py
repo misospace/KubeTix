@@ -21,14 +21,13 @@ import os
 import sqlite3
 import sys
 
-
 DEFAULT_DB = "kubetix.db"
 
 
 def get_db_path():
     url = os.environ.get("DATABASE_URL", "")
     if url.startswith("sqlite:///"):
-        return url[len("sqlite:///"):]
+        return url[len("sqlite:///") :]
     return os.environ.get("DATABASE_PATH", DEFAULT_DB)
 
 
@@ -140,8 +139,10 @@ def cleanup_orphans(conn: sqlite3.Connection, issues: dict):
     # These must be handled manually.
     restrict_orphans = {k: v for k, v in issues.items() if "RESTRICT" in str(v)}
     if restrict_orphans:
-        print("WARNING: The following tables have RESTRICT FK constraints and "
-              "cannot be auto-cleaned. Remove orphaned records manually:")
+        print(
+            "WARNING: The following tables have RESTRICT FK constraints and "
+            "cannot be auto-cleaned. Remove orphaned records manually:"
+        )
         for key, info in restrict_orphans.items():
             print(f"  - {key}: {info['detail']}")
         raise ValueError(
@@ -171,10 +172,16 @@ def apply_fk_constraints(conn: sqlite3.Connection):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Migrate KubeTix DB to add FK constraints")
+    parser = argparse.ArgumentParser(
+        description="Migrate KubeTix DB to add FK constraints"
+    )
     parser.add_argument("--database", default=None, help="Path to SQLite database")
-    parser.add_argument("--dry-run", action="store_true", help="Check only, don't modify")
-    parser.add_argument("--cleanup", action="store_true", help="Auto-cleanup orphaned child records")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Check only, don't modify"
+    )
+    parser.add_argument(
+        "--cleanup", action="store_true", help="Auto-cleanup orphaned child records"
+    )
     args = parser.parse_args()
 
     db_path = args.database or get_db_path()
@@ -190,7 +197,9 @@ def main():
         issues = check_orphans(conn)
 
         if not issues:
-            print("✓ No orphaned records found. Database is compatible with FK constraints.")
+            print(
+                "✓ No orphaned records found. Database is compatible with FK constraints."
+            )
             apply_fk_constraints(conn)
             return 0
 
