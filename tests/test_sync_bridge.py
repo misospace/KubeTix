@@ -45,6 +45,15 @@ def _seed_cli_db(db_path):
             encrypted_kubeconfig TEXT
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id TEXT PRIMARY KEY,
+            grant_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            details TEXT
+        )
+    """)
     cursor.execute(
         """
         INSERT INTO grants (id, cluster_name, namespace, role, created_at,
@@ -248,3 +257,35 @@ def test_sync_to_api_sends_auth_token():
         server.server_close()
 
     assert received_headers.get("Authorization") == "Bearer test-token-123"
+
+
+def test_sync_to_api_writes_audit_log(tmp_path):
+    """sync_to_api should write audit_log entries for synced grants."""
+    db_path = _seed_cli_db(str(tmp_path / "test.db"))
+
+    port = 18097
+    server = HTTPServer(("127.0.0.1", port), _MockHandler)
+    t = Thread(target=server.handle_request, daemon=True)
+    t.start()
+
+    try:
+        with mock.patch.object(kc_share, "DB_PATH", Path(db_path)):
+            kc_share.sync_to_api(
+                api_url=f"http://127.0.0.1:{port}",
+                token=None,
+            )
+    finally:
+        server.server_close()
+
+    # Verify audit_log entry was created
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT grant_id, action FROM audit_log WHERE action = 'synced_to_api'"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0][0] == "g-1"
+    assert rows[0][1] == "synced_to_api"

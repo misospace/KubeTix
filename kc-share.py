@@ -482,6 +482,9 @@ def sync_to_api(api_url: str, token: Optional[str]) -> None:
     bridges the silo by POSTing every active, non-revoked grant to the
     API's /grants endpoint, reusing the CLI's existing Fernet encryption
     so the API can decrypt the kubeconfig with the shared key.
+
+    Each successfully synced grant produces an audit_log entry for
+    compliance and forensics.
     """
     try:
         import urllib.request
@@ -496,17 +499,17 @@ def sync_to_api(api_url: str, token: Optional[str]) -> None:
         "revoked, metadata, encrypted_kubeconfig FROM grants WHERE revoked = 0"
     )
     rows = cursor.fetchall()
-    conn.close()
 
     if not rows:
         print("No grants to sync")
+        conn.close()
         return
 
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    synced = 0
+    synced_ids = []
     failed = 0
     for row in rows:
         (
@@ -541,13 +544,28 @@ def sync_to_api(api_url: str, token: Optional[str]) -> None:
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if 200 <= resp.status < 300:
-                    synced += 1
+                    synced_ids.append(grant_id)
                 else:
                     failed += 1
         except (urllib.error.URLError, urllib.error.HTTPError):
             failed += 1
 
-    print(f"✅ Synced {synced} grant(s) to {api_url} ({failed} failed)")
+    # Write audit_log entries for all successfully synced grants
+    for grant_id in synced_ids:
+        cursor.execute(
+            "INSERT INTO audit_log (id, grant_id, action, details) VALUES (?, ?, ?, ?)",
+            (
+                secrets.token_urlsafe(8),
+                grant_id,
+                "synced_to_api",
+                f"Synced grant to {api_url}",
+            ),
+        )
+
+    conn.commit()
+    conn.close()
+
+    print(f"✅ Synced {len(synced_ids)} grant(s) to {api_url} ({failed} failed)")
 
 
 if __name__ == "__main__":
