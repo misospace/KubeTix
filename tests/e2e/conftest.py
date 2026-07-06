@@ -35,6 +35,8 @@ def api_url():
 def setup_environment():
     """Set up test environment."""
     # Ensure we're using the right kubeconfig
-    os.environ["KUBECONFIG"] = os.environ.get("KUBECONFIG", "/tmp/kubetix-e2e-kubeconfig")
+    os.environ["KUBECONFIG"] = os.environ.get(
+        "KUBECONFIG", "/tmp/kubetix-e2e-kubeconfig"
+    )
     yield
     # Cleanup if needed
