@@ -184,5 +184,57 @@ class TestPasswordHashing:
         assert verify_password("wrongpassword", hashed) is False
 
 
+class TestAccessTokenLifetime:
+    """Regression tests for the default JWT access token lifetime.
+
+    Issue #157: the previous default of 7 days is far too long for an
+    access token that has no refresh token or revocation mechanism beyond
+    an in-memory blacklist. A stolen token must have a limited blast
+    radius, so the default must remain short.
+    """
+
+    def test_access_token_default_ttl_is_short(self):
+        """Default token lifetime must not exceed 1 hour."""
+        from kubetix_api.auth import ACCESS_TOKEN_EXPIRE_MINUTES
+
+        assert ACCESS_TOKEN_EXPIRE_MINUTES <= 60, (
+            "ACCESS_TOKEN_EXPIRE_MINUTES=%d is too long for an access "
+            "token without a refresh token or revocation mechanism"
+            % ACCESS_TOKEN_EXPIRE_MINUTES
+        )
+
+    def test_access_token_default_ttl_is_not_seven_days(self):
+        """Explicit regression guard for issue #157 (was 60*24*7 minutes)."""
+        from kubetix_api.auth import ACCESS_TOKEN_EXPIRE_MINUTES
+
+        assert ACCESS_TOKEN_EXPIRE_MINUTES != 60 * 24 * 7
+
+    def test_create_access_token_uses_short_default_ttl(self):
+        """A token created without an explicit expires_delta must expire
+        within the configured short window."""
+        from datetime import datetime, timedelta, timezone
+        from kubetix_api.auth import (
+            ACCESS_TOKEN_EXPIRE_MINUTES,
+            create_access_token,
+        )
+
+        before = datetime.now(timezone.utc)
+        token = create_access_token(data={"sub": "user@example.com"})
+        # Decode without verifying signature to inspect the `exp` claim.
+        from jose import jwt as jose_jwt
+
+        payload = jose_jwt.get_unverified_claims(token)
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        lifetime = exp - before
+
+        # Lifetime must be close to ACCESS_TOKEN_EXPIRE_MINUTES (allow a
+        # generous tolerance to absorb clock skew / function latency in
+        # either direction).
+        expected = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        assert abs(lifetime - expected) < timedelta(seconds=10)
+        # And absolute cap: must be <= 1 hour.
+        assert lifetime <= timedelta(hours=1)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

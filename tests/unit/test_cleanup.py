@@ -35,8 +35,8 @@ def test_purge_expired_grants_removes_only_expired(monkeypatch):
 
     now = datetime.now(timezone.utc)
     store = [
-        {"id": 1, "expires_at": now - timedelta(hours=1)},   # expired
-        {"id": 2, "expires_at": now + timedelta(hours=1)},   # active
+        {"id": 1, "expires_at": now - timedelta(hours=1)},  # expired
+        {"id": 2, "expires_at": now + timedelta(hours=1)},  # active
         {"id": 3, "expires_at": now - timedelta(seconds=1)},  # expired
     ]
 
@@ -105,4 +105,6 @@ async def test_cleanup_loop_survives_purge_errors(monkeypatch, caplog):
     # The loop must have run more than once (failure did not stop it).
     assert state["n"] >= 2
     # The failure was logged at ERROR level.
-    assert any("Expired-grant cleanup iteration failed" in r.message for r in caplog.records)
+    assert any(
+        "Expired-grant cleanup iteration failed" in r.message for r in caplog.records
+    )
