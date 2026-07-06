@@ -55,8 +55,7 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
         cursor = conn.cursor()
 
         # Create grants table WITHOUT encrypted_kubeconfig column (v1 schema)
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE grants (
                 id TEXT PRIMARY KEY,
                 cluster_name TEXT NOT NULL,
@@ -67,12 +66,10 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
                 revoked BOOLEAN DEFAULT 0,
                 metadata TEXT
             )
-        """
-        )
+        """)
 
         # Create audit_log with old 'timestamp' column name
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE audit_log (
                 id TEXT PRIMARY KEY,
                 grant_id TEXT NOT NULL,
@@ -80,17 +77,20 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 details TEXT
             )
-        """
-        )
+        """)
 
         # Create schema_version at v1
-        cursor.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)"
+        )
         cursor.execute("INSERT INTO schema_version VALUES (1)")
 
         conn.commit()
         return conn
 
-    def _insert_legacy_grant(self, conn, grant_id, cluster_name, encrypted_kc_in_metadata):
+    def _insert_legacy_grant(
+        self, conn, grant_id, cluster_name, encrypted_kc_in_metadata
+    ):
         """Insert a legacy-format grant with kubeconfig in metadata."""
         metadata = {"kubeconfig_encrypted": encrypted_kc_in_metadata}
         cursor = conn.cursor()
@@ -102,7 +102,10 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
                 cluster_name,
                 "default",
                 "view",
-                (datetime.now(timezone.utc).replace(microsecond=0) + __import__("datetime").timedelta(hours=1)).isoformat(),
+                (
+                    datetime.now(timezone.utc).replace(microsecond=0)
+                    + __import__("datetime").timedelta(hours=1)
+                ).isoformat(),
                 json.dumps(metadata),
             ),
         )
@@ -134,7 +137,9 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
 
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+        )
         result = cursor.fetchone()
         conn.close()
 
@@ -161,7 +166,9 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
         grant = kc_share.get_grant(grant_id)
         self.assertIsNotNone(grant)
         self.assertIsNotNone(grant["encrypted_kubeconfig"])
-        self.assertNotEqual(grant["encrypted_kubeconfig"], encrypted_kc)  # Re-encrypted with new key
+        self.assertNotEqual(
+            grant["encrypted_kubeconfig"], encrypted_kc
+        )  # Re-encrypted with new key
 
         # Verify we can decrypt the migrated kubeconfig
         decrypted = decrypt_data(grant["encrypted_kubeconfig"])
@@ -177,7 +184,9 @@ class TestMigrationLegacyMetadata(unittest.TestCase):
         fernet_old = __import__("cryptography.fernet").fernet.Fernet(old_key.encode())
         old_encrypted = fernet_old.encrypt(kc.encode()).decode()
 
-        self._insert_legacy_grant(conn, "test-key-rotation", "test-cluster", old_encrypted)
+        self._insert_legacy_grant(
+            conn, "test-key-rotation", "test-cluster", old_encrypted
+        )
         conn.close()
 
         # Generate a NEW key (simulate key rotation)

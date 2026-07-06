@@ -19,6 +19,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # FastAPI dependency
 # ---------------------------------------------------------------------------
 
+
 def get_db() -> Generator[Session, None, None]:
     """Yield a database session; close it afterwards."""
     db = SessionLocal()
@@ -31,6 +32,7 @@ def get_db() -> Generator[Session, None, None]:
 # ---------------------------------------------------------------------------
 # Schema initialisation
 # ---------------------------------------------------------------------------
+
 
 def init_db() -> None:
     """Create all tables defined in kubetix_api.models."""

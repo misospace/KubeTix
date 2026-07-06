@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
 # Required by _get_fernet() — tests use a fixed key so encrypted grants are
 # decryptable across test runs.  Individual tests may override or delete this
 # via monkeypatch when they need to exercise the "key not set" path.
-os.environ.setdefault("KUBECONFIG_ENCRYPTION_KEY", "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso=")
+os.environ.setdefault(
+    "KUBECONFIG_ENCRYPTION_KEY", "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
+)
 
 from main import app, Base, get_db, User, get_password_hash
 from _shared_db import engine, TestingSessionLocal, override_get_db
@@ -63,6 +65,16 @@ def client(_setup_tables):
     # Reset slowapi rate limiter state (clears all internal dicts)
     _reset_rate_limiter()
 
+    # Resolve CORS origins the same way the app's lifespan startup hook does.
+    # Tests don't drive the lifespan (TestClient is created directly here, not
+    # via the context-manager form), so we populate the shared list that the
+    # CORSMiddleware holds a reference to. Doing this here, rather than at
+    # import time, mirrors production behavior (issue #142).
+    from main import ALLOWED_ORIGINS as _allowed_origins, _resolve_cors_origins
+
+    _allowed_origins.clear()
+    _allowed_origins.extend(_resolve_cors_origins())
+
     yield TestClient(app)
 
     # Final cleanup
@@ -81,10 +93,13 @@ def db_session(_setup_tables):
 
 import os
 
+
 @pytest.fixture(scope="function")
 def db(db_session):
     """Alias for db_session (some test files use 'db' instead of 'db_session')."""
     return db_session
+
+
 @pytest.fixture(scope="function")
 def test_user(db):
     """Create a regular (non-admin) test user."""
@@ -98,17 +113,17 @@ def test_user(db):
     return user
 
 
-
 # Additional fixtures needed by audit log and download grant tests
 @pytest.fixture(scope="function")
 def admin_user(db):
     """Create an admin user."""
     from main import create_access_token
+
     user = User(
         id="admin-user-123",
         email="admin@example.com",
         hashed_password=get_password_hash("adminpassword123"),
-        is_admin=True
+        is_admin=True,
     )
     db.add(user)
     db.commit()
@@ -119,7 +134,10 @@ def admin_user(db):
 def admin_token(db, admin_user):
     from main import create_access_token
     from datetime import timedelta
-    token = create_access_token(data={"sub": admin_user.email}, expires_delta=timedelta(minutes=60*24*7))
+
+    token = create_access_token(
+        data={"sub": admin_user.email}, expires_delta=timedelta(minutes=60 * 24 * 7)
+    )
     return token
 
 
@@ -133,7 +151,7 @@ def other_user(db):
     user = User(
         id="other-user-456",
         email="other@example.com",
-        hashed_password=get_password_hash("otherpassword123")
+        hashed_password=get_password_hash("otherpassword123"),
     )
     db.add(user)
     db.commit()
@@ -144,7 +162,10 @@ def other_user(db):
 def other_token(db, other_user):
     from main import create_access_token
     from datetime import timedelta
-    token = create_access_token(data={"sub": other_user.email}, expires_delta=timedelta(minutes=60*24*7))
+
+    token = create_access_token(
+        data={"sub": other_user.email}, expires_delta=timedelta(minutes=60 * 24 * 7)
+    )
     return token
 
 
@@ -184,7 +205,7 @@ def auth_token(client, db_session):
     user = User(
         id="test-user-123",
         email="test@example.com",
-        hashed_password=get_password_hash("testpassword123")
+        hashed_password=get_password_hash("testpassword123"),
     )
     db_session.add(user)
     db_session.commit()
@@ -192,22 +213,14 @@ def auth_token(client, db_session):
     # Login to get token — reset rate limiter first, retry once if rate-limited
     _reset_rate_limiter()
     response = client.post(
-        "/login",
-        json={
-            "email": "test@example.com",
-            "password": "testpassword123"
-        }
+        "/login", json={"email": "test@example.com", "password": "testpassword123"}
     )
     data = response.json()
     if response.status_code == 429 or "access_token" not in data:
         # Rate-limited; reset and retry once
         _reset_rate_limiter()
         response = client.post(
-            "/login",
-            json={
-                "email": "test@example.com",
-                "password": "testpassword123"
-            }
+            "/login", json={"email": "test@example.com", "password": "testpassword123"}
         )
         data = response.json()
     return data["access_token"]

@@ -48,7 +48,13 @@ interface AuthToken {
 }
 
 // ---------------------------------------------------------------------------
-// API client helpers (token stored in localStorage)
+// API client helpers
+//
+// Tokens are stored in sessionStorage rather than localStorage to limit
+// persistence (tokens are cleared when the tab/window closes) and reduce the
+// window of XSS-driven exfiltration. The proper long-term mitigation is to
+// store JWTs in httpOnly + Secure cookies issued by the API; that backend
+// change is tracked separately.
 // ---------------------------------------------------------------------------
 
 const getApiUrl = (): string => {
@@ -60,17 +66,17 @@ const getApiUrl = (): string => {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null
-  return localStorage.getItem("kubetix_token")
+  return sessionStorage.getItem("kubetix_token")
 }
 
 function setToken(token: string): void {
   if (typeof window === "undefined") return
-  localStorage.setItem("kubetix_token", token)
+  sessionStorage.setItem("kubetix_token", token)
 }
 
 function clearToken(): void {
   if (typeof window === "undefined") return
-  localStorage.removeItem("kubetix_token")
+  sessionStorage.removeItem("kubetix_token")
 }
 
 function getAuthHeader(): Record<string, string> | undefined {

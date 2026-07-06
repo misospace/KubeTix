@@ -8,6 +8,7 @@ import pytest
 # Import the main app (imports from _shared_db for shared fixtures)
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "kubetix-api"))
 from main import app
 
@@ -99,8 +100,7 @@ class TestOIDCEndpoints:
         # This test would require a valid JWT token
         # Just verify the endpoint exists
         response = client.get(
-            "/auth/oidc/userinfo",
-            headers={"Authorization": "Bearer test-token"}
+            "/auth/oidc/userinfo", headers={"Authorization": "Bearer test-token"}
         )
 
         # Should fail with auth error, not 404
@@ -184,7 +184,10 @@ class TestCORSLocking:
 
         assert response.status_code == 200
         # With allow_credentials=True and explicit origin, Access-Control-Allow-Origin should match
-        assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+        assert (
+            response.headers.get("access-control-allow-origin")
+            == "http://localhost:3000"
+        )
 
     def test_cors_rejects_unknown_origin(self, client):
         """Test CORS rejects unknown origins (no wildcard)."""
@@ -192,21 +195,41 @@ class TestCORSLocking:
 
         assert response.status_code == 200
         # With explicit origins and no match, Access-Control-Allow-Origin should be empty
-        assert response.headers.get("access-control-allow-origin") is None or \
-               response.headers.get("access-control-allow-origin") == ""
+        assert (
+            response.headers.get("access-control-allow-origin") is None
+            or response.headers.get("access-control-allow-origin") == ""
+        )
 
     def test_cors_custom_origin(self, client, monkeypatch):
         """Test CORS respects custom KUBETIX_CORS_ORIGINS env var."""
-        monkeypatch.setenv("KUBETIX_CORS_ORIGINS", "https://app.example.com,https://admin.example.com")
+        # Regression test for issue #142: CORS config must be resolved at app
+        # startup (lifespan), not at module import time, so env var changes
+        # between import and startup are honored.
+        import main as kubetix_main
+        from main import _resolve_cors_origins
 
-        # Note: CORSMiddleware is applied at import time, so re-setting env vars won't
-        # change the already-configured middleware in tests. This test documents the
-        # expected behavior when the app starts with custom origins.
-        # The important thing is that allow_origins is no longer ["*"].
+        monkeypatch.setenv(
+            "KUBETIX_CORS_ORIGINS",
+            "https://app.example.com,https://admin.example.com",
+        )
+
+        origins = _resolve_cors_origins()
+
+        assert origins == [
+            "https://app.example.com",
+            "https://admin.example.com",
+        ]
+
+        # And the helper must populate the module-level list that the
+        # CORSMiddleware instance holds a reference to.
+        kubetix_main.ALLOWED_ORIGINS.clear()
+        kubetix_main.ALLOWED_ORIGINS.extend(_resolve_cors_origins())
+        assert "https://app.example.com" in kubetix_main.ALLOWED_ORIGINS
 
     def test_cors_no_wildcard_in_config(self):
         """Test that CORS config does not use wildcard."""
         import os
+
         cors_raw = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:3000")
         origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
 
@@ -241,6 +264,7 @@ class TestSSORoundTrip:
 
         # 2. Extract the state from the auth_url (it is the auth_code id)
         import urllib.parse
+
         parsed = urllib.parse.urlparse(login_data["auth_url"])
         query = urllib.parse.parse_qs(parsed.query)
         auth_code_id = query["state"][0]
@@ -259,8 +283,9 @@ class TestSSORoundTrip:
             },
         )
 
-        with patch("httpx.post", return_value=mock_token_resp), \
-             patch("httpx.get", return_value=mock_userinfo_resp):
+        with patch("httpx.post", return_value=mock_token_resp), patch(
+            "httpx.get", return_value=mock_userinfo_resp
+        ):
             # 4. Call the callback endpoint with the same state (auth_code_id)
             response = client.post(
                 "/auth/sso/callback?provider=google&code=fake-auth-code"
@@ -290,6 +315,7 @@ class TestSSORoundTrip:
 
         # 2. Extract the state from the auth_url
         import urllib.parse
+
         parsed = urllib.parse.urlparse(login_data["auth_url"])
         query = urllib.parse.parse_qs(parsed.query)
         auth_code_id = query["state"][0]
@@ -328,7 +354,9 @@ class TestSSORoundTrip:
         assert response.status_code == 400
         assert "invalid or expired" in response.json()["detail"].lower()
 
-    def test_sso_callback_rejects_reused_state(self, client, db, mock_google_sso_env, monkeypatch):
+    def test_sso_callback_rejects_reused_state(
+        self, client, db, mock_google_sso_env, monkeypatch
+    ):
         """Test that a successfully-used auth code cannot be reused."""
         import httpx
         from unittest.mock import patch
@@ -340,6 +368,7 @@ class TestSSORoundTrip:
         code_verifier = login_data["code_verifier"]
 
         import urllib.parse
+
         parsed = urllib.parse.urlparse(login_data["auth_url"])
         query = urllib.parse.parse_qs(parsed.query)
         auth_code_id = query["state"][0]
@@ -354,8 +383,9 @@ class TestSSORoundTrip:
         )
 
         # 2. First callback succeeds
-        with patch("httpx.post", return_value=mock_token_resp), \
-             patch("httpx.get", return_value=mock_userinfo_resp):
+        with patch("httpx.post", return_value=mock_token_resp), patch(
+            "httpx.get", return_value=mock_userinfo_resp
+        ):
             response = client.post(
                 "/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
@@ -363,8 +393,9 @@ class TestSSORoundTrip:
         assert response.status_code == 200
 
         # 3. Second callback with same state must fail (record marked used)
-        with patch("httpx.post", return_value=mock_token_resp), \
-             patch("httpx.get", return_value=mock_userinfo_resp):
+        with patch("httpx.post", return_value=mock_token_resp), patch(
+            "httpx.get", return_value=mock_userinfo_resp
+        ):
             response = client.post(
                 "/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
@@ -372,7 +403,9 @@ class TestSSORoundTrip:
         assert response.status_code == 400
         assert "invalid or expired" in response.json()["detail"].lower()
 
-    def test_sso_callback_rejects_mismatched_csrf_state(self, client, db, mock_google_sso_env, monkeypatch):
+    def test_sso_callback_rejects_mismatched_csrf_state(
+        self, client, db, mock_google_sso_env, monkeypatch
+    ):
         """Regression test: callback must reject a request where the state
         does not match the CSRF token stored during login, even if the
         code_verifier is correct. This verifies that the IdP-echoed state
@@ -389,10 +422,12 @@ class TestSSORoundTrip:
 
         # 2. Verify the auth URL carries the csrf_state (not an internal id)
         import urllib.parse
+
         parsed = urllib.parse.urlparse(login_data["auth_url"])
         query = urllib.parse.parse_qs(parsed.query)
-        assert query["state"][0] == csrf_state, \
-            "Auth URL state parameter must be the CSRF token"
+        assert (
+            query["state"][0] == csrf_state
+        ), "Auth URL state parameter must be the CSRF token"
 
         # 3. Callback with a *different* state must fail even with correct verifier
         mock_token_resp = httpx.Response(
@@ -411,8 +446,9 @@ class TestSSORoundTrip:
             200,
             json={"email": "csrf@example.com", "name": "CSRF", "sub": "sub-csrf"},
         )
-        with patch("httpx.post", return_value=mock_token_resp), \
-             patch("httpx.get", return_value=mock_userinfo_resp):
+        with patch("httpx.post", return_value=mock_token_resp), patch(
+            "httpx.get", return_value=mock_userinfo_resp
+        ):
             response = client.post(
                 "/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"

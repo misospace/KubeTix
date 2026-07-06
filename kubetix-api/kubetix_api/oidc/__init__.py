@@ -13,10 +13,10 @@ from kubetix_api.database import get_db, SessionLocal
 from kubetix_api.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from kubetix_api.models import User, provision_user
 
-
 # ---------------------------------------------------------------------------
 # OIDC endpoint resolution
 # ---------------------------------------------------------------------------
+
 
 def _oidc_endpoints(issuer: str) -> dict:
     """Return OIDC discovery endpoints for the given issuer."""
@@ -69,6 +69,7 @@ def _get_userinfo(issuer: str, access_token: str) -> dict:
 # PKCE helpers (RFC 7636)
 # ---------------------------------------------------------------------------
 
+
 def _generate_pkce_params() -> tuple[str, str]:
     """Generate a PKCE code_verifier and its S256 code_challenge."""
     code_verifier = secrets.token_urlsafe(64)  # 86 chars, within limits
@@ -118,11 +119,15 @@ def _verify_auth_code(
     from kubetix_api.models import AuthCode
 
     now = datetime.now(timezone.utc)
-    record = db.query(AuthCode).filter(
-        AuthCode.state == received_state,
-        AuthCode.used == False,
-        AuthCode.expires_at > now,
-    ).first()
+    record = (
+        db.query(AuthCode)
+        .filter(
+            AuthCode.state == received_state,
+            AuthCode.used == False,
+            AuthCode.expires_at > now,
+        )
+        .first()
+    )
     if record is None:
         return False
 

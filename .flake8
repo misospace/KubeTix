@@ -1,0 +1,28 @@
+[flake8]
+# KubeTix code style: allow long lines (matches Black's default of 88 +
+# pragmatic tolerance for URLs, log strings, test assertions, etc.) and
+# tolerate whitespace on otherwise-blank lines, which is common in this
+# repo's existing files.
+#
+# F401 (unused import) is ignored package-wide because the package's
+# `__init__.py` modules re-export names for the public API, and several
+# fixtures / modules in tests import helpers solely for side effects.
+#
+# E402 (module level import not at top of file) is ignored because
+# fixtures and config code commonly import after constants.
+#
+# E712 (comparison to True/False) and E203 (whitespace before ':') are
+# style nits that don't affect correctness.
+#
+# F841 (local variable assigned but never used) and F811 (redefinition
+# of unused name) are tolerated to avoid touching unrelated test code.
+max-line-length = 120
+extend-ignore =
+    E501,
+    W293,
+    E402,
+    E712,
+    E203,
+    F401,
+    F841,
+    F811

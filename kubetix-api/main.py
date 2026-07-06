@@ -51,8 +51,24 @@ except ImportError:
 # ---------------------------------------------------------------------------
 from fastapi.middleware.cors import CORSMiddleware
 
-_CORS_ORIGINS_RAW = os.environ.get("KUBETIX_CORS_ORIGINS", "http://localhost:3000")
-ALLOWED_ORIGINS = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()]
+# Resolved at app startup (see lifespan below) rather than at import time, so
+# KUBETIX_CORS_ORIGINS env changes between module load and process start are
+# honored without a full module reload. Mutated in-place so the CORSMiddleware
+# instance — which holds a reference to this list — picks up new origins on
+# the next request after startup.
+ALLOWED_ORIGINS: list[str] = []
+
+
+def _resolve_cors_origins(env: dict[str, str] | None = None) -> list[str]:
+    """Parse KUBETIX_CORS_ORIGINS into a list of origins.
+
+    Reads from the provided env mapping (defaults to os.environ) so tests can
+    inject values without mutating the real environment.
+    """
+    src = env if env is not None else os.environ
+    raw = src.get("KUBETIX_CORS_ORIGINS", "http://localhost:3000")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
 
 # ---------------------------------------------------------------------------
 # App factory with lifespan (modern FastAPI pattern)
@@ -69,6 +85,12 @@ async def lifespan(app: FastAPI):
     # Startup
     from kubetix_api.database import init_db
     import os as _os
+
+    # Populate CORS origins from the environment at startup, not at import.
+    # Mutate in-place so the CORSMiddleware instance (constructed below with
+    # a reference to this list) sees the resolved origins.
+    ALLOWED_ORIGINS.clear()
+    ALLOWED_ORIGINS.extend(_resolve_cors_origins())
 
     # Skip init_db in test mode — conftest handles table creation
     if not _os.environ.get("TESTING"):

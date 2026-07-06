@@ -13,7 +13,6 @@ from kubetix_api.database import get_db
 from kubetix_api.models import Grant, AuditLog, User
 from kubetix_api.schemas import GrantCreate, GrantResponse, GrantWithKubeconfig
 
-
 # ---------------------------------------------------------------------------
 # Encryption helper
 # ---------------------------------------------------------------------------
@@ -37,6 +36,7 @@ def _get_fernet() -> Fernet:
 # ---------------------------------------------------------------------------
 # Grant operations
 # ---------------------------------------------------------------------------
+
 
 def list_grants_for_user(
     user: User,
@@ -122,7 +122,9 @@ def get_grant(grant_id: str, current_user: User, db) -> GrantWithKubeconfig:
     if not grant:
         raise HTTPException(status_code=404, detail="Grant not found")
     if grant.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this grant")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to access this grant"
+        )
     if grant.revoked:
         raise HTTPException(status_code=400, detail="Grant has been revoked")
 
@@ -152,7 +154,9 @@ def revoke_grant(grant_id: str, current_user: User, db) -> None:
     if not grant:
         raise HTTPException(status_code=404, detail="Grant not found")
     if grant.user_id != current_user.id and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to revoke this grant")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to revoke this grant"
+        )
 
     grant.revoked = True
     db.commit()
@@ -172,9 +176,15 @@ def get_audit_log(db, current_user: User) -> List[dict]:
     if current_user.is_admin:
         logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(100).all()
     else:
-        logs = db.query(AuditLog).filter(
-            AuditLog.user_id == current_user.id,
-        ).order_by(AuditLog.created_at.desc()).limit(100).all()
+        logs = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.user_id == current_user.id,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(100)
+            .all()
+        )
 
     return [
         {
