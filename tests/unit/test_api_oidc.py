@@ -487,13 +487,13 @@ class TestSSOErrorHandling:
         assert response.status_code == 401
         detail = response.json()["detail"]
         # Verify provider status code is included
-        assert "403" in detail, (
-            f"Error message should include provider status code: {detail}"
-        )
+        assert (
+            "403" in detail
+        ), f"Error message should include provider status code: {detail}"
         # Verify provider error body is included
-        assert "access_denied" in detail or "User denied access" in detail, (
-            f"Error message should include provider response body: {detail}"
-        )
+        assert (
+            "access_denied" in detail or "User denied access" in detail
+        ), f"Error message should include provider response body: {detail}"
 
     def test_sso_callback_userinfo_error_includes_provider_details(
         self, client, db, mock_google_sso_env, monkeypatch
@@ -526,8 +526,11 @@ class TestSSOErrorHandling:
                 return mock_userinfo_resp
             raise ValueError(f"Unexpected method: {method}")
 
-        with patch("httpx.post", side_effect=lambda *a, **kw: mock_request("POST", *a, **kw)), \
-             patch("httpx.get", side_effect=lambda *a, **kw: mock_request("GET", *a, **kw)):
+        with patch(
+            "httpx.post", side_effect=lambda *a, **kw: mock_request("POST", *a, **kw)
+        ), patch(
+            "httpx.get", side_effect=lambda *a, **kw: mock_request("GET", *a, **kw)
+        ):
             response = client.post(
                 "/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
@@ -536,13 +539,13 @@ class TestSSOErrorHandling:
         assert response.status_code == 401
         detail = response.json()["detail"]
         # Verify provider status code is included
-        assert "500" in detail, (
-            f"Error message should include provider status code: {detail}"
-        )
+        assert (
+            "500" in detail
+        ), f"Error message should include provider status code: {detail}"
         # Verify provider error body is included
-        assert "Internal Server Error" in detail, (
-            f"Error message should include provider response body: {detail}"
-        )
+        assert (
+            "Internal Server Error" in detail
+        ), f"Error message should include provider response body: {detail}"
 
     def test_oidc_callback_token_exchange_error_includes_provider_details(
         self, client, db, mock_oidc_env, monkeypatch
@@ -574,9 +577,9 @@ class TestSSOErrorHandling:
         assert response.status_code == 401
         detail = response.json()["detail"]
         # Verify the exception message (which includes provider details) is in the error
-        assert "invalid_grant" in detail or "401" in detail, (
-            f"Error message should include provider error details: {detail}"
-        )
+        assert (
+            "invalid_grant" in detail or "401" in detail
+        ), f"Error message should include provider error details: {detail}"
 
     def test_oidc_callback_userinfo_error_includes_provider_details(
         self, client, db, mock_oidc_env, monkeypatch
@@ -607,8 +610,9 @@ class TestSSOErrorHandling:
             resp.raise_for_status()
             return resp
 
-        with patch("httpx.post", side_effect=mock_post), \
-             patch("httpx.get", side_effect=mock_get):
+        with patch("httpx.post", side_effect=mock_post), patch(
+            "httpx.get", side_effect=mock_get
+        ):
             response = client.post(
                 "/auth/oidc/callback?code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
@@ -617,6 +621,6 @@ class TestSSOErrorHandling:
         assert response.status_code == 401
         detail = response.json()["detail"]
         # Verify the exception message (which includes provider details) is in the error
-        assert "503" in detail or "Service Unavailable" in detail, (
-            f"Error message should include provider error details: {detail}"
-        )
+        assert (
+            "503" in detail or "Service Unavailable" in detail
+        ), f"Error message should include provider error details: {detail}"
