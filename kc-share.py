@@ -509,8 +509,17 @@ def sync_to_api(api_url: str, token: Optional[str]) -> None:
     synced = 0
     failed = 0
     for row in rows:
-        (grant_id, cluster_name, namespace, role, created_at,
-         expires_at, revoked, metadata, encrypted_kubeconfig) = row
+        (
+            grant_id,
+            cluster_name,
+            namespace,
+            role,
+            created_at,
+            expires_at,
+            revoked,
+            metadata,
+            encrypted_kubeconfig,
+        ) = row
         payload = {
             "id": grant_id,
             "cluster_name": cluster_name,
