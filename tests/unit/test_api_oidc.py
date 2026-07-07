@@ -624,3 +624,105 @@ class TestSSOErrorHandling:
         assert (
             "503" in detail or "Service Unavailable" in detail
         ), f"Error message should include provider error details: {detail}"
+
+
+class TestOIDCEndpointsDiscovery:
+    """Regression tests for #143: OIDC endpoint paths must come from the
+    OIDC Discovery document at ``/.well-known/openid-configuration``
+    (OpenID Connect Discovery 1.0) rather than being hardcoded."""
+
+    def test_uses_discovery_document_when_available(self, monkeypatch):
+        """When the provider publishes a discovery document, its
+        ``token_endpoint`` / ``userinfo_endpoint`` MUST be used verbatim
+        — never the legacy ``/oauth/token`` / ``/oauth/userinfo`` paths."""
+        from unittest.mock import patch, MagicMock
+        from kubetix_api.oidc import _oidc_endpoints
+
+        discovery = {
+            "issuer": "https://idp.test",
+            "authorization_endpoint": "https://idp.test/connect/authorize",
+            "token_endpoint": "https://idp.test/connect/token",
+            "userinfo_endpoint": "https://idp.test/connect/userinfo",
+            "jwks_uri": "https://idp.test/connect/jwks.json",
+            "end_session_endpoint": "https://idp.test/connect/logout",
+        }
+
+        captured_urls = []
+
+        def fake_get(url, *args, **kwargs):
+            captured_urls.append(url)
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = discovery
+            return resp
+
+        with patch("httpx.get", side_effect=fake_get):
+            endpoints = _oidc_endpoints("https://idp.test/")
+
+        # OIDC Discovery 1.0 mandates this exact well-known path.
+        assert captured_urls == ["https://idp.test/.well-known/openid-configuration"]
+        # Paths MUST come from the discovery document, not from /oauth/* hardcoding.
+        assert endpoints["token_endpoint"] == "https://idp.test/connect/token"
+        assert endpoints["userinfo_endpoint"] == "https://idp.test/connect/userinfo"
+        # And explicitly: the legacy hardcoded path MUST NOT be used.
+        assert "/oauth/token" not in endpoints["token_endpoint"]
+        assert "/oauth/userinfo" not in endpoints["userinfo_endpoint"]
+
+    def test_falls_back_to_legacy_paths_when_discovery_unavailable(self, monkeypatch):
+        """If the discovery document can't be fetched (network error,
+        non-2xx, malformed body), fall back to the legacy ``/oauth/...``
+        paths so local providers without a discovery document keep working."""
+        from unittest.mock import patch
+        import httpx
+        from kubetix_api.oidc import _oidc_endpoints
+
+        def fake_get(*args, **kwargs):
+            raise httpx.ConnectError("boom")
+
+        with patch("httpx.get", side_effect=fake_get):
+            endpoints = _oidc_endpoints("https://idp.test/")
+
+        assert endpoints["token_endpoint"] == "https://idp.test/oauth/token"
+        assert endpoints["userinfo_endpoint"] == "https://idp.test/oauth/userinfo"
+
+    def test_falls_back_when_discovery_returns_non_dict(self, monkeypatch):
+        """A discovery response that isn't a JSON object must not crash."""
+        from unittest.mock import patch, MagicMock
+        from kubetix_api.oidc import _oidc_endpoints
+
+        def fake_get(*args, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = ["not", "a", "dict"]
+            return resp
+
+        with patch("httpx.get", side_effect=fake_get):
+            endpoints = _oidc_endpoints("https://idp.test")
+
+        assert endpoints["token_endpoint"] == "https://idp.test/oauth/token"
+        assert endpoints["userinfo_endpoint"] == "https://idp.test/oauth/userinfo"
+
+    def test_falls_back_per_endpoint_when_keys_missing(self, monkeypatch):
+        """If the discovery document omits a particular endpoint, fall
+        back to the legacy path for just that endpoint, while still
+        using the discovery-provided value for any endpoint it lists."""
+        from unittest.mock import patch, MagicMock
+        from kubetix_api.oidc import _oidc_endpoints
+
+        # Discovery doc lists a custom token_endpoint but no userinfo_endpoint.
+        discovery = {
+            "token_endpoint": "https://idp.test/api/token",
+        }
+
+        def fake_get(*args, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = discovery
+            return resp
+
+        with patch("httpx.get", side_effect=fake_get):
+            endpoints = _oidc_endpoints("https://idp.test")
+
+        assert endpoints["token_endpoint"] == "https://idp.test/api/token"
+        # userinfo missing from doc → fall back to legacy path.
+        assert endpoints["userinfo_endpoint"] == "https://idp.test/oauth/userinfo"
