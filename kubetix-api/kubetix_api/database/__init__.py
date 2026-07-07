@@ -90,3 +90,10 @@ def init_db() -> None:
     from kubetix_api.models import Base  # noqa: F401
 
     Base.metadata.create_all(bind=get_engine())
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible alias for code that imports SessionLocal directly
+# ---------------------------------------------------------------------------
+
+SessionLocal = get_session_factory()

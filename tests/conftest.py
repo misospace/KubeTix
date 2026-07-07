@@ -177,21 +177,14 @@ def other_headers(other_token):
 def _reset_rate_limiter():
     """Reset slowapi rate limiter storage to prevent cross-test leaks.
 
-    The `limits` MemoryStorage uses multiple dicts (storage, expirations, events, locks).
-    Calling `.clear(key)` only removes one key; we need to clear all entries.
+    Uses the public Limiter.reset() API instead of manipulating internal storage,
+    which avoids fragility when slowapi internals change.
     """
     if hasattr(app.state, "limiter") and app.state.limiter is not None:
-        st = getattr(app.state.limiter, "_storage", None)
-        if st is not None:
-            try:
-                # Clear all internal storage dicts (limits.MemoryStorage internals)
-                st.storage.clear()
-                st.expirations.clear()
-                st.events.clear()
-                if hasattr(st, "locks"):
-                    st.locks.clear()
-            except Exception:
-                pass
+        try:
+            app.state.limiter.reset()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="function")

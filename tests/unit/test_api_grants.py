@@ -7,15 +7,10 @@ import pytest
 import json
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from _shared_db import engine, TestingSessionLocal
-import secrets
 import os
-
-os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
 import tempfile
+import secrets
 
 # Import the main app
 import sys
@@ -33,9 +28,6 @@ def _fernet_encrypt(data: str) -> str:
     if not key:
         raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
     return Fernet(key.encode()).encrypt(data.encode()).decode()
-
-
-# Test database (in-memory SQLite)
 
 
 class TestListGrants:
