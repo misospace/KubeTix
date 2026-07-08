@@ -17,11 +17,7 @@ so each test function starts with a clean slate.
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from _shared_db import engine, TestingSessionLocal
-import time
 
 # Import the main app
 import sys

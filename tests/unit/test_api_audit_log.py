@@ -6,19 +6,12 @@ Tests the /audit endpoint and audit log entries created by grant operations
 import pytest
 import json
 from datetime import datetime, timezone, timedelta
-import secrets
 import os
 import tempfile
 import sys
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from _shared_db import engine, TestingSessionLocal
 from fastapi.testclient import TestClient
 from pathlib import Path
-
-# Set encryption key before importing main
-os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "kubetix-api"))
 from main import (
@@ -31,13 +24,6 @@ from main import (
     get_password_hash,
     create_access_token,
 )
-
-# Test database (in-memory SQLite)
-_TEST_DB_URL = f"sqlite:///:memory:?dbname=audit_log_{secrets.token_hex(4)}"
-_engine = create_engine(
-    _TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool
-)
-_TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
 
 class TestAuditLogEndpoint:

@@ -7,23 +7,16 @@ import pytest
 import json
 from cryptography.fernet import Fernet
 from datetime import datetime, timezone, timedelta
-import secrets
 import os
 import tempfile
+import secrets
 import sys
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import StaticPool
 from _shared_db import engine, TestingSessionLocal
 from fastapi.testclient import TestClient
 from pathlib import Path
 
-# Set encryption key before importing main
-os.environ["KUBECONFIG_ENCRYPTION_KEY"] = "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "kubetix-api"))
 from main import app, Base, get_db, User, Grant, get_password_hash, create_access_token
-from cryptography.fernet import Fernet
 
 
 # Fernet encryption helper for creating test encrypted kubeconfig grants
@@ -32,14 +25,6 @@ def _fernet_encrypt(data: str) -> str:
     if not key:
         raise RuntimeError("KUBECONFIG_ENCRYPTION_KEY not set")
     return Fernet(key.encode()).encrypt(data.encode()).decode()
-
-
-# Test database (in-memory SQLite)
-_TEST_DB_URL = f"sqlite:///:memory:?dbname=download_grant_{secrets.token_hex(4)}"
-_engine = create_engine(
-    _TEST_DB_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool
-)
-_TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
 
 class TestDownloadGrant:
