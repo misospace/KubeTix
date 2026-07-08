@@ -17,12 +17,55 @@ from kubetix_api.models import User, provision_user
 # OIDC endpoint resolution
 # ---------------------------------------------------------------------------
 
+_OIDC_DISCOVERY_TIMEOUT_SECONDS = 5.0
+
+
+def _fetch_oidc_discovery(issuer: str) -> dict | None:
+    """Fetch the OpenID Connect Discovery document for ``issuer``.
+
+    Per OpenID Connect Discovery 1.0 the document lives at
+    ``{issuer}/.well-known/openid-configuration`` and exposes the canonical
+    ``token_endpoint`` / ``userinfo_endpoint`` (plus jwks_uri, etc.).
+
+    Returns the parsed JSON document, or ``None`` if discovery is unavailable
+    (network error, non-2xx response, malformed body, etc.).
+    """
+    import httpx
+
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+    try:
+        response = httpx.get(discovery_url, timeout=_OIDC_DISCOVERY_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        document = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
 
 def _oidc_endpoints(issuer: str) -> dict:
-    """Return OIDC discovery endpoints for the given issuer."""
+    """Return OIDC endpoint URLs for ``issuer``.
+
+    Resolves endpoints via the OIDC Discovery document at
+    ``{issuer}/.well-known/openid-configuration`` (OpenID Connect Discovery 1.0)
+    so we honor the provider's published paths instead of assuming the legacy
+    ``/oauth/token`` and ``/oauth/userinfo`` layout.
+
+    Falls back to those legacy ``/oauth/...`` paths when discovery is
+    unavailable so local providers that don't publish a discovery document
+    keep working.
+    """
+    base = issuer.rstrip("/")
+    document = _fetch_oidc_discovery(issuer)
+    if document:
+        return {
+            "token_endpoint": document.get("token_endpoint", f"{base}/oauth/token"),
+            "userinfo_endpoint": document.get(
+                "userinfo_endpoint", f"{base}/oauth/userinfo"
+            ),
+        }
     return {
-        "token_endpoint": f"{issuer.rstrip('/')}/oauth/token",
-        "userinfo_endpoint": f"{issuer.rstrip('/')}/oauth/userinfo",
+        "token_endpoint": f"{base}/oauth/token",
+        "userinfo_endpoint": f"{base}/oauth/userinfo",
     }
 
 
