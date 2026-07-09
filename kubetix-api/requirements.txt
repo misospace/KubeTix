@@ -1,5 +1,5 @@
-fastapi==0.138.1
-uvicorn[standard]==0.49.0
+fastapi==0.139.0
+uvicorn[standard]==0.50.2
 sqlalchemy==2.0.51
 python-jose[cryptography]==3.5.0
 bcrypt>=5.0.0,<5.1.0  # pinned to 4.x; bcrypt 5.x breaks passlib's CryptContext
