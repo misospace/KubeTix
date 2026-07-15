@@ -240,9 +240,11 @@ async def register_user(
 @limiter.limit("10 per minute")
 async def login(
     request: Request,
+    response: Response,
     user_data: UserLogin,
     db=Depends(get_db),
 ):
+    from kubetix_api.auth import set_auth_cookie
     from kubetix_api.models import User as UserModel
 
     user = db.query(UserModel).filter(UserModel.email == user_data.email).first()
@@ -265,6 +267,10 @@ async def login(
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
+    # Issue the JWT as an httpOnly + Secure cookie so the browser never
+    # has to keep it in JavaScript-readable storage (audit #144).
+    set_auth_cookie(response, access_token)
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -276,10 +282,13 @@ async def login(
 @limiter.limit("10 per minute")
 async def logout(
     request: Request,
+    response: Response,
     authorization: str = Header(None),
 ):
-    """Blacklist the current JWT so it cannot be reused."""
-    from kubetix_api.auth import blacklist_token
+    """Blacklist the current JWT so it cannot be reused and clear the auth cookie."""
+    from kubetix_api.auth import blacklist_token, clear_auth_cookie, AUTH_COOKIE_NAME
+
+    clear_auth_cookie(response)
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -454,6 +463,7 @@ from kubetix_api.oidc import (  # noqa: E402
 @limiter.limit("5 per minute")
 async def sso_callback(
     request: Request,
+    response: Response,
     provider: str,
     code: str,
     db=Depends(get_db),
@@ -613,6 +623,7 @@ async def sso_callback(
         userinfo.get("sub") or userinfo.get("id") or userinfo.get("github_id", "")
     )
 
+    from kubetix_api.auth import set_auth_cookie
     from kubetix_api.models import provision_user
 
     user = provision_user(
@@ -623,6 +634,8 @@ async def sso_callback(
         data={"sub": user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
+
+    set_auth_cookie(response, access_token_jwt)
 
     return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
@@ -708,6 +721,7 @@ async def sso_login(
 @limiter.limit("5 per minute")
 async def oidc_callback(
     request: Request,
+    response: Response,
     code: str,
     db=Depends(get_db),
 ):
@@ -780,6 +794,10 @@ async def oidc_callback(
         data={"sub": user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
+
+    from kubetix_api.auth import set_auth_cookie
+
+    set_auth_cookie(response, access_token_jwt)
 
     return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
