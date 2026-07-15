@@ -50,11 +50,12 @@ interface AuthToken {
 // ---------------------------------------------------------------------------
 // API client helpers
 //
-// Tokens are stored in sessionStorage rather than localStorage to limit
-// persistence (tokens are cleared when the tab/window closes) and reduce the
-// window of XSS-driven exfiltration. The proper long-term mitigation is to
-// store JWTs in httpOnly + Secure cookies issued by the API; that backend
-// change is tracked separately.
+// The JWT is delivered by the API as an httpOnly + Secure cookie (set by
+// /login and the SSO/OIDC callbacks). That keeps it out of JavaScript-readable
+// storage (audit #144) so an XSS payload cannot read or exfiltrate it. All
+// authenticated requests send `credentials: "include"` so the browser
+// attaches the cookie automatically; we never need to read or write the
+// token from JS.
 // ---------------------------------------------------------------------------
 
 const getApiUrl = (): string => {
@@ -64,48 +65,32 @@ const getApiUrl = (): string => {
   return ""
 }
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null
-  return sessionStorage.getItem("kubetix_token")
-}
-
-function setToken(token: string): void {
-  if (typeof window === "undefined") return
-  sessionStorage.setItem("kubetix_token", token)
-}
-
-function clearToken(): void {
-  if (typeof window === "undefined") return
-  sessionStorage.removeItem("kubetix_token")
-}
-
-function getAuthHeader(): Record<string, string> | undefined {
-  const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : undefined
-}
+// Always include the httpOnly auth cookie on same-origin / credentialed
+// cross-origin requests.
+const CREDENTIALS = { withCredentials: true } as const
 
 async function apiLogin(email: string, password: string): Promise<AuthToken> {
   const apiUrl = getApiUrl()
-  const resp = await axios.post(`${apiUrl}/login`, { email, password })
-  setToken(resp.data.access_token)
+  const resp = await axios.post(`${apiUrl}/login`, { email, password }, CREDENTIALS)
+  // The token is only kept in an httpOnly cookie. We deliberately do NOT
+  // read it here; the cookie is sent automatically by the browser.
   return resp.data
 }
 
-async function apiLogout(token?: string): Promise<void> {
+async function apiLogout(): Promise<void> {
   const apiUrl = getApiUrl()
-  if (apiUrl && token) {
+  if (apiUrl) {
     try {
-      await axios.post(`${apiUrl}/auth/logout`, {}, { headers: { Authorization: `Bearer ${token}` } })
+      await axios.post(`${apiUrl}/auth/logout`, {}, CREDENTIALS)
     } catch {
       // Best-effort: proceed with local cleanup even if server call fails
     }
   }
-  clearToken()
 }
 
 async function fetchGrants(): Promise<Grant[]> {
   const apiUrl = getApiUrl()
-  const resp = await axios.get(`${apiUrl}/grants`, { headers: getAuthHeader() })
+  const resp = await axios.get(`${apiUrl}/grants`, CREDENTIALS)
   return resp.data
 }
 
@@ -116,13 +101,13 @@ async function createGrant(payload: {
   expiry_hours: number
 }): Promise<Grant> {
   const apiUrl = getApiUrl()
-  const resp = await axios.post(`${apiUrl}/grants`, payload, { headers: getAuthHeader() })
+  const resp = await axios.post(`${apiUrl}/grants`, payload, CREDENTIALS)
   return resp.data
 }
 
 async function revokeGrant(grantId: string): Promise<void> {
   const apiUrl = getApiUrl()
-  await axios.delete(`${apiUrl}/grants/${grantId}`, { headers: getAuthHeader() })
+  await axios.delete(`${apiUrl}/grants/${grantId}`, CREDENTIALS)
 }
 
 // ---------------------------------------------------------------------------
@@ -171,27 +156,20 @@ export default function Home() {
   const checkAuthAndFetch = useCallback(async () => {
     setAuthLoading(true)
     setError(null)
-    
-    const token = getToken()
-    if (!token) {
-      setAuthLoading(false)
-      setLoading(false)
-      return
-    }
 
-    // Validate token by fetching /users/me
+    // Validate the session by hitting /users/me. The httpOnly cookie is
+    // sent automatically; a 401 means the user is not signed in.
     try {
       const apiUrl = getApiUrl()
-      const resp = await axios.get(`${apiUrl}/users/me`, { headers: getAuthHeader() })
+      const resp = await axios.get(`${apiUrl}/users/me`, CREDENTIALS)
       setCurrentUser(resp.data)
       setIsLoggedIn(true)
-      
+
       // Fetch grants after confirming auth
       const grantsData = await fetchGrants()
       setGrants(grantsData)
     } catch {
-      // Token invalid — clear it
-      clearToken()
+      // Session invalid or absent
       setIsLoggedIn(false)
       setCurrentUser(null)
     } finally {
@@ -232,8 +210,7 @@ export default function Home() {
   }
 
   const handleLogout = async () => {
-    const token = getToken()
-    await apiLogout(token ?? undefined)
+    await apiLogout()
     setIsLoggedIn(false)
     setCurrentUser(null)
     setGrants([])
