@@ -9,6 +9,11 @@ import pytest
 def test_purge_expired_grants_removes_only_expired(monkeypatch):
     """Expired grants are deleted; non-expired grants are kept."""
 
+    class FakeGrant:
+        def __init__(self, id_, expires_at):
+            self.id = id_
+            self.expires_at = expires_at
+
     class FakeSession:
         def __init__(self, store):
             self.store = store
@@ -18,11 +23,23 @@ def test_purge_expired_grants_removes_only_expired(monkeypatch):
 
         def filter(self, _cond):
             now = datetime.now(timezone.utc)
-            kept = [g for g in self.store if g["expires_at"] >= now]
-            removed = len(self.store) - len(kept)
+            expired = [g for g in self.store if g.expires_at < now]
+            kept = [g for g in self.store if g.expires_at >= now]
+            self._expired = expired
+            self._kept = kept
+            return self
+
+        def all(self):
+            return list(getattr(self, "_expired", []))
+
+        def update(self, values, synchronize_session="fetch"):
+            return 0
+
+        def delete(self, synchronize_session=False):
+            removed = len(self._expired)
             self.store.clear()
-            self.store.extend(kept)
-            return MagicMock(delete=MagicMock(return_value=removed))
+            self.store.extend(self._kept)
+            return removed
 
         def commit(self):
             pass
@@ -35,9 +52,9 @@ def test_purge_expired_grants_removes_only_expired(monkeypatch):
 
     now = datetime.now(timezone.utc)
     store = [
-        {"id": 1, "expires_at": now - timedelta(hours=1)},  # expired
-        {"id": 2, "expires_at": now + timedelta(hours=1)},  # active
-        {"id": 3, "expires_at": now - timedelta(seconds=1)},  # expired
+        FakeGrant(1, now - timedelta(hours=1)),  # expired
+        FakeGrant(2, now + timedelta(hours=1)),  # active
+        FakeGrant(3, now - timedelta(seconds=1)),  # expired
     ]
 
     def factory():
@@ -48,7 +65,7 @@ def test_purge_expired_grants_removes_only_expired(monkeypatch):
     deleted = cleanup.purge_expired_grants(factory)
 
     assert deleted == 2
-    assert [g["id"] for g in store] == [2]
+    assert [g.id for g in store] == [2]
 
 
 @pytest.mark.asyncio
@@ -108,3 +125,73 @@ async def test_cleanup_loop_survives_purge_errors(monkeypatch, caplog):
     assert any(
         "Expired-grant cleanup iteration failed" in r.message for r in caplog.records
     )
+
+
+def test_purge_expired_grants_preserves_audit_trail(monkeypatch):
+    """AuditLog rows referencing expired grants have grant_id nulled before deletion (issue #250)."""
+
+    class FakeGrant:
+        def __init__(self, id_):
+            self.id = id_
+
+    class FakeAuditLog:
+        def __init__(self, grant_id):
+            self.grant_id = grant_id
+
+    class FakeQuery:
+        def __init__(self, model, store):
+            self.model = model
+            self.store = store
+
+        def filter(self, _cond):
+            return self
+
+        def all(self):
+            return list(self.store)
+
+        def update(self, values, synchronize_session="fetch"):
+            for item in self.store:
+                for key, val in values.items():
+                    # Handle SQLAlchemy InstrumentedAttribute keys
+                    attr_name = getattr(key, "key", str(key))
+                    setattr(item, attr_name, val)
+            return len(self.store)
+
+        def delete(self, synchronize_session=False):
+            count = len(self.store)
+            self.store.clear()
+            return count
+
+    class FakeSession:
+        def __init__(self):
+            self.grants = [
+                FakeGrant("expired-1"),
+                FakeGrant("expired-2"),
+            ]
+            self.audit_logs = [
+                FakeAuditLog("expired-1"),
+                FakeAuditLog("expired-2"),
+                FakeAuditLog(None),
+            ]
+
+        def query(self, model):
+            if model.__name__ == "Grant":
+                return FakeQuery(model, self.grants)
+            elif model.__name__ == "AuditLog":
+                return FakeQuery(model, self.audit_logs)
+            raise ValueError(f"Unknown model: {model}")
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            raise RuntimeError("rollback called unexpectedly")
+
+        def close(self):
+            pass
+
+    from kubetix_api import cleanup
+
+    deleted = cleanup.purge_expired_grants(lambda: FakeSession())
+
+    assert deleted == 2
