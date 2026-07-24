@@ -86,6 +86,33 @@ class TestAuditLogEndpoint:
         revoke_entries = [log for log in logs if log["action"] == "revoked"]
         assert len(revoke_entries) >= 1
 
+    def test_audit_log_contains_grant_download(
+        self, client, db, auth_headers, monkeypatch
+    ):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+            kubeconfig_path = f.name
+        monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
+        client.post(
+            "/grants",
+            json={"cluster_name": "download-test-cluster", "role": "view"},
+            headers=auth_headers,
+        )
+        grants_response = client.get("/grants", headers=auth_headers)
+        grant_id = grants_response.json()[0]["id"]
+        download_response = client.get(
+            f"/grants/{grant_id}/download", headers=auth_headers
+        )
+        assert download_response.status_code == 200
+        os.unlink(kubeconfig_path)
+        audit_response = client.get("/audit", headers=auth_headers)
+        logs = audit_response.json()
+        download_entries = [log for log in logs if log["action"] == "downloaded"]
+        assert len(download_entries) >= 1
+        assert "download-test-cluster" in download_entries[0]["details"]
+
     def test_audit_log_fields(self, client, db, auth_headers, monkeypatch):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -225,6 +252,10 @@ class TestAuditLogIntegration:
         )
         assert create_response.status_code == 201
         grant_id = create_response.json()["id"]
+        download_response = client.get(
+            f"/grants/{grant_id}/download", headers=auth_headers
+        )
+        assert download_response.status_code == 200
         os.unlink(kubeconfig_path)
         revoke_response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
         assert revoke_response.status_code == 204
@@ -232,10 +263,13 @@ class TestAuditLogIntegration:
         logs = audit_response.json()
         actions = [log["action"] for log in logs]
         assert "created" in actions
+        assert "downloaded" in actions
         assert "revoked" in actions
         created_entry = next(log for log in logs if log["action"] == "created")
+        downloaded_entry = next(log for log in logs if log["action"] == "downloaded")
         revoked_entry = next(log for log in logs if log["action"] == "revoked")
         assert created_entry["grant_id"] == grant_id
+        assert downloaded_entry["grant_id"] == grant_id
         assert revoked_entry["grant_id"] == grant_id
 
     def test_audit_log_grant_id_present(self, client, db, auth_headers, monkeypatch):

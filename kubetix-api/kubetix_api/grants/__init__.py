@@ -137,6 +137,16 @@ def get_grant(grant_id: str, current_user: User, db) -> GrantWithKubeconfig:
     fernet = _get_fernet()
     kubeconfig = fernet.decrypt(grant.encrypted_kubeconfig.encode()).decode()
 
+    # Log the download event in the audit log
+    audit_log = AuditLog(
+        user_id=current_user.id,
+        grant_id=grant.id,
+        action="downloaded",
+        details=f"Downloaded kubeconfig for cluster '{grant.cluster_name}'",
+    )
+    db.add(audit_log)
+    db.commit()
+
     return GrantWithKubeconfig(
         id=grant.id,
         cluster_name=grant.cluster_name,
