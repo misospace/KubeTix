@@ -12,6 +12,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  web-build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Build web Docker image
+      run: docker build --tag kubetix-web:ci ./kubetix-web
+
   test:
     runs-on: ubuntu-latest
 
