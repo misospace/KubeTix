@@ -152,11 +152,7 @@ app = FastAPI(
 if HAS_RATE_LIMITING:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    # Register slowapi startup handler (compatible with all FastAPI versions)
-    if hasattr(app, "add_event_handler"):
-        app.add_event_handler("startup", limiter.slowapi_startup)
-    else:
-        app.on_event("startup")(limiter.slowapi_startup)
+    app.router.add_event_handler("startup", limiter.slowapi_startup)
 
 app.add_middleware(
     CORSMiddleware,
