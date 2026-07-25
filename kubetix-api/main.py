@@ -24,27 +24,13 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response, 
 # Rate limiting (optional)
 # ---------------------------------------------------------------------------
 
-try:
-    from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
-    from slowapi.errors import RateLimitExceeded
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
-    HAS_RATE_LIMITING = True
-    limiter = Limiter(
-        key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
-    )
-except ImportError:
-    HAS_RATE_LIMITING = False
-
-    # No-op limiter so decorators always work regardless of rate limiting config.
-    class _NoOpLimiter:
-        def limit(self, *args, **kwargs):
-            def decorator(f):
-                return f
-
-            return decorator
-
-    limiter = _NoOpLimiter()
+limiter = Limiter(
+    key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
+)
 
 # ---------------------------------------------------------------------------
 # CORS middleware
@@ -149,10 +135,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-if HAS_RATE_LIMITING:
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    app.router.add_event_handler("startup", limiter.slowapi_startup)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
