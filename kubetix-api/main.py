@@ -102,35 +102,42 @@ async def lifespan(app: FastAPI):
         init_db()
 
     _admin_password = _os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
-    if not _admin_password:
-        import logging
+    try:
+        if not _admin_password:
+            import logging
 
-        logging.warning(
-            "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
-            "The API will run without a default admin account. "
-            "Create the first admin via /users registration or by setting "
-            "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
-        )
-    else:
-        from kubetix_api.database import SessionLocal
-        from kubetix_api.models import User
-        from kubetix_api.auth import get_password_hash
+            logging.warning(
+                "KubeTix startup: no INITIAL_ADMIN_PASSWORD set. "
+                "The API will run without a default admin account. "
+                "Create the first admin via /users registration or by setting "
+                "INITIAL_ADMIN_PASSWORD=<strong-password> in production."
+            )
+        else:
+            from kubetix_api.database import SessionLocal
+            from kubetix_api.models import User
+            from kubetix_api.auth import get_password_hash
 
-        db = SessionLocal()
-        try:
-            admin = db.query(User).filter(User.email == "admin@kubetix.local").first()
-            if not admin:
-                admin = User(
-                    id=__import__("secrets").token_urlsafe(16),
-                    email="admin@kubetix.local",
-                    hashed_password=get_password_hash(_admin_password),
-                    full_name="Admin User",
-                    is_admin=True,
+            db = SessionLocal()
+            try:
+                admin = (
+                    db.query(User).filter(User.email == "admin@kubetix.local").first()
                 )
-                db.add(admin)
-                db.commit()
-        finally:
-            db.close()
+                if not admin:
+                    admin = User(
+                        id=__import__("secrets").token_urlsafe(16),
+                        email="admin@kubetix.local",
+                        hashed_password=get_password_hash(_admin_password),
+                        full_name="Admin User",
+                        is_admin=True,
+                    )
+                    db.add(admin)
+                    db.commit()
+            finally:
+                db.close()
+    finally:
+        # Clear sensitive credential from the environment and local variable.
+        _os.environ.pop("INITIAL_ADMIN_PASSWORD", None)
+        _admin_password = ""
     yield
     # Shutdown: signal background tasks to stop and wait for them.
     _cleanup_stop.set()
