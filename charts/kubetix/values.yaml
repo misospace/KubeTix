@@ -175,9 +175,6 @@ env: {}
   # MAX_GRANT_HOURS: "720"
   # DEFAULT_GRANT_HOURS: "24"
 
-# Custom annotations for pods
-podAnnotations: {}
-
 # Custom labels for resources
 customLabels: {}
 
@@ -186,9 +183,6 @@ volumes: []
 
 # Additional volume mounts
 volumeMounts: []
-
-# Additional volumes
-volumes: []
 
 # Extra volumes (merged with default volumes)
 extraVolumes: []
