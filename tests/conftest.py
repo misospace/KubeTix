@@ -23,6 +23,11 @@ os.environ.setdefault(
     "KUBECONFIG_ENCRYPTION_KEY", "NJGBGddzqA6EVxj4Ld4yDGOmBi2srREevbPY7Z7JNso="
 )
 
+# Required by kubetix_api.auth — tests use a fixed key so JWTs are stable
+# across test runs.  Individual tests may override or delete this via
+# monkeypatch when they need to exercise the "key not set" path.
+os.environ.setdefault("KUBETIX_SECRET_KEY", "test-secret-key-for-testing")
+
 from main import app, Base, get_db, User, get_password_hash
 from _shared_db import engine, TestingSessionLocal, override_get_db
 

@@ -87,11 +87,21 @@ Once running, visit:
 
 ## Environment Variables
 
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | Database connection string (e.g. `postgresql://user:pass@localhost/kubetix`) |
+| `KUBETIX_SECRET_KEY` | Yes | Secret key used to sign JWT tokens. **Must be set** — the API will refuse to start without it. Generate one with: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `KUBECONFIG` | No | Path to kubeconfig file for cluster access |
+
 ```bash
+# Generate a secure secret key
+export KUBETIX_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
 DATABASE_URL=postgresql://user:pass@localhost/kubetix
-KUBETIX_SECRET_KEY=your-secret-key-change-in-production
 KUBECONFIG=/path/to/kubeconfig
 ```
+
+> **⚠️ Important:** `KUBETIX_SECRET_KEY` must be a stable, persistent value. If it changes (e.g., due to regeneration on every restart), all existing JWT tokens become invalid immediately, breaking active sessions and automation. Store it in a secrets manager or environment file.
 
 ## Bootstrap Admin User
 
