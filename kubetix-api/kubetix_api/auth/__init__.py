@@ -79,26 +79,68 @@ def get_password_hash(password: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Token blacklist (in-memory; survives within a single process lifetime)
+# Token blacklist (database-backed; persists across restarts, issue #257)
 # ---------------------------------------------------------------------------
 
-_TOKEN_BLACKLIST: dict[str, datetime] = {}
+
+def blacklist_token(
+    jti: str, expires_at: datetime, db: Optional["Session"] = None  # noqa: F821
+) -> None:
+    """Add a token jti to the database-backed blacklist.
+
+    If *db* is provided it is used directly (caller owns the session).
+    Otherwise a new session is created and closed automatically.
+    """
+    from kubetix_api.database import get_session_factory
+    from kubetix_api.models import BlacklistedToken
+
+    own_session = db is None
+    if own_session:
+        db = get_session_factory()()  # type: ignore[no-redef]
+    try:
+        db.add(BlacklistedToken(jti=jti, expires_at=expires_at))
+        if own_session:
+            db.commit()
+    except Exception:
+        if own_session:
+            db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()
 
 
-def blacklist_token(jti: str, expires_at: datetime) -> None:
-    """Add a token jti to the blacklist until it would have expired."""
-    _TOKEN_BLACKLIST[jti] = expires_at
+def is_blacklisted(jti: str, db: Optional["Session"] = None) -> bool:  # noqa: F821
+    """Check whether a token jti is blacklisted and not yet expired.
 
+    If *db* is provided it is used directly (caller owns the session).
+    Otherwise a new session is created and closed automatically.
+    """
+    from kubetix_api.database import get_session_factory
+    from kubetix_api.models import BlacklistedToken
 
-def is_blacklisted(jti: str) -> bool:
-    """Check whether a token jti is blacklisted and not yet expired."""
-    exp = _TOKEN_BLACKLIST.get(jti)
-    if exp is None:
-        return False
-    if datetime.now(timezone.utc) >= exp:
-        del _TOKEN_BLACKLIST[jti]
-        return False
-    return True
+    own_session = db is None
+    if own_session:
+        db = get_session_factory()()  # type: ignore[no-redef]
+    try:
+        entry = db.query(BlacklistedToken).filter(BlacklistedToken.jti == jti).first()
+        if entry is None:
+            return False
+        expires_at = entry.expires_at
+        # Handle naive datetimes (e.g., from SQLite) by assuming UTC
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if now >= expires_at:
+            # Entry expired — remove stale record
+            db.delete(entry)
+            if own_session:
+                db.commit()
+            return False
+        return True
+    finally:
+        if own_session:
+            db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +165,7 @@ def create_access_token(
 # ---------------------------------------------------------------------------
 
 
-def _decode_payload(token: str) -> dict:
+def _decode_payload(token: str, db: Optional["Session"] = None) -> dict:  # noqa: F821
     """Decode and validate a JWT, raising HTTPException on failure."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -134,7 +176,7 @@ def _decode_payload(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
     jti: str | None = payload.get("jti")
-    if jti and is_blacklisted(jti):
+    if jti and is_blacklisted(jti, db=db):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",
@@ -167,7 +209,7 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = _decode_payload(token)
+    payload = _decode_payload(token, db=db)
     email: str | None = payload.get("sub")
     if email is None:
         raise HTTPException(

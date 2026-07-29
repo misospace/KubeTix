@@ -4,6 +4,7 @@ Tests the FastAPI backend authentication endpoints
 """
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -234,6 +235,96 @@ class TestAccessTokenLifetime:
         assert abs(lifetime - expected) < timedelta(seconds=10)
         # And absolute cap: must be <= 1 hour.
         assert lifetime <= timedelta(hours=1)
+
+
+class TestBlacklistedTokenPersistence:
+    """Tests for database-backed JWT token blacklist (issue #257).
+
+    The in-memory dict was replaced with a ``BlacklistedToken`` table so that
+    logouts survive process restarts.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup_blacklist_db(self, monkeypatch):
+        """Point kubetix_api.database at the test database and create tables."""
+        import os
+        from kubetix_api import database
+
+        # Use the same in-memory SQLite DB as the rest of the tests
+        monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:?cache=shared")
+        database.reset_engine()
+
+        from main import Base
+
+        # Create tables on the engine used by blacklist_token/is_blacklisted
+        Base.metadata.create_all(bind=database.get_engine())
+        yield
+
+    def test_blacklist_token_persists_in_database(self):
+        """blacklist_token() must write to the BlacklistedToken table."""
+        from kubetix_api.auth import blacklist_token
+        from kubetix_api.database import get_session_factory
+        from main import BlacklistedToken
+
+        jti = "test-jti-123"
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        blacklist_token(jti, expires_at)
+
+        db = get_session_factory()()
+        try:
+            entry = (
+                db.query(BlacklistedToken).filter(BlacklistedToken.jti == jti).first()
+            )
+            assert entry is not None
+            # SQLite may strip timezone info; compare naive versions
+            stored_naive = (
+                entry.expires_at.replace(tzinfo=None)
+                if entry.expires_at.tzinfo is not None
+                else entry.expires_at
+            )
+            input_naive = expires_at.replace(tzinfo=None)
+            assert stored_naive == input_naive
+        finally:
+            db.close()
+
+    def test_is_blacklisted_returns_true_for_valid_entry(self):
+        """is_blacklisted() must return True for a non-expired blacklisted token."""
+        from kubetix_api.auth import blacklist_token, is_blacklisted
+
+        jti = "test-jti-456"
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        blacklist_token(jti, expires_at)
+
+        assert is_blacklisted(jti) is True
+
+    def test_is_blacklisted_returns_false_for_unknown_jti(self):
+        """is_blacklisted() must return False for a jti that was never blacklisted."""
+        from kubetix_api.auth import is_blacklisted
+
+        assert is_blacklisted("never-blacklisted-jti") is False
+
+    def test_is_blacklisted_returns_false_and_removes_expired_entry(self):
+        """is_blacklisted() must return False for an expired entry and clean it up."""
+        from kubetix_api.auth import blacklist_token, is_blacklisted
+        from kubetix_api.database import get_session_factory
+        from main import BlacklistedToken
+
+        jti = "expired-jti-789"
+        # Set expires_at in the past
+        expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        blacklist_token(jti, expires_at)
+
+        assert is_blacklisted(jti) is False
+
+        # Entry should have been removed
+        db = get_session_factory()()
+        try:
+            entry = (
+                db.query(BlacklistedToken).filter(BlacklistedToken.jti == jti).first()
+            )
+            assert entry is None
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

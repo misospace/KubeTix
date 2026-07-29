@@ -195,6 +195,7 @@ from kubetix_api.models import (  # noqa: E402,F401
     AuthCode,
     Grant,
     AuditLog,
+    BlacklistedToken,
 )  # noqa: E402,F401
 from kubetix_api.schemas import (  # noqa: E402
     UserCreate,
@@ -294,6 +295,7 @@ async def logout(
 ):
     """Blacklist the current JWT so it cannot be reused and clear the auth cookie."""
     from kubetix_api.auth import blacklist_token, clear_auth_cookie, AUTH_COOKIE_NAME
+    from kubetix_api.database import get_session_factory
 
     clear_auth_cookie(response)
 
@@ -310,7 +312,15 @@ async def logout(
     exp_raw: int | None = payload.get("exp")
     if jti and exp_raw is not None:
         expires_at = datetime.fromtimestamp(exp_raw, tz=timezone.utc)
-        blacklist_token(jti, expires_at)
+        db = get_session_factory()()
+        try:
+            blacklist_token(jti, expires_at, db=db)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
 
 @app.get("/users/me", response_model=UserResponse)

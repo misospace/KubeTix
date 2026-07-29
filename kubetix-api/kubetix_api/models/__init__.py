@@ -115,6 +115,22 @@ class AuditLog(Base):  # noqa: N801
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class BlacklistedToken(Base):  # noqa: N801
+    """Persisted JWT blacklist so logouts survive process restarts (issue #257).
+
+    Stores the JWT ID (`jti`) alongside its expiry time.  Entries past their
+    `expires_at` are stale and can be cleaned up by a background task or
+    ignored during lookups.
+    """
+
+    __tablename__ = "blacklisted_tokens"
+
+    id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
+    jti = Column(String(255), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # ---------------------------------------------------------------------------
 # Helpers that depend on ORM models (used by auth/oidc modules)
 # ---------------------------------------------------------------------------
