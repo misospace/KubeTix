@@ -494,7 +494,7 @@ export default function Home() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Encryption</p>
-                <p className="text-2xl font-bold text-gray-900">AES-128</p>
+                <p className="text-2xl font-bold text-gray-900">AES-128-CBC + HMAC</p>
               </div>
             </div>
           </div>
