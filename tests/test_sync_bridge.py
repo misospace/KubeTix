@@ -111,7 +111,7 @@ def test_sync_to_api_pushes_local_grants(tmp_path):
             server.server_close()
 
         assert _MockHandler.received is not None
-        assert "/grants/g-1" in _MockHandler.received["path"]
+        assert "api/v1/grants/g-1" in _MockHandler.received["path"]
         payload = _MockHandler.received["body"]
         assert payload["id"] == "g-1"
         assert payload["cluster_name"] == "test-cluster"

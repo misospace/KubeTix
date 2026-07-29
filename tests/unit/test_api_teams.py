@@ -29,7 +29,7 @@ class TestCreateTeam:
     def test_create_team_success(self, client, auth_headers):
         """Test creating a new team."""
         response = client.post(
-            "/teams",
+            "api/v1/teams",
             json={"name": "test-team", "description": "A test team"},
             headers=auth_headers,
         )
@@ -43,7 +43,7 @@ class TestCreateTeam:
     def test_create_team_minimal(self, client, auth_headers):
         """Test creating a team with minimal data."""
         response = client.post(
-            "/teams", json={"name": "minimal-team"}, headers=auth_headers
+            "api/v1/teams", json={"name": "minimal-team"}, headers=auth_headers
         )
         assert response.status_code == 201
         data = response.json()
@@ -52,20 +52,20 @@ class TestCreateTeam:
     def test_create_team_without_name(self, client, auth_headers):
         """Test creating a team without name fails."""
         response = client.post(
-            "/teams", json={"description": "No name team"}, headers=auth_headers
+            "api/v1/teams", json={"description": "No name team"}, headers=auth_headers
         )
         assert response.status_code == 422
 
     def test_create_team_invalid_name(self, client, auth_headers):
         """Test creating a team with invalid name (spaces/uppercase) fails."""
         response = client.post(
-            "/teams", json={"name": "Invalid Team Name"}, headers=auth_headers
+            "api/v1/teams", json={"name": "Invalid Team Name"}, headers=auth_headers
         )
         assert response.status_code == 422
 
     def test_create_team_unauthorized(self, client):
         """Test creating a team without authentication."""
-        response = client.post("/teams", json={"name": "test-team"})
+        response = client.post("api/v1/teams", json={"name": "test-team"})
         assert response.status_code == 401
 
 
@@ -74,7 +74,7 @@ class TestListTeams:
 
     def test_list_teams_empty(self, client, auth_headers):
         """Test listing teams when none exist."""
-        response = client.get("/teams", headers=auth_headers)
+        response = client.get("api/v1/teams", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []
 
@@ -95,7 +95,7 @@ class TestListTeams:
         db_session.commit()
 
         # List teams
-        response = client.get("/teams", headers=auth_headers)
+        response = client.get("api/v1/teams", headers=auth_headers)
         assert response.status_code == 200
         teams = response.json()
         assert len(teams) == 1
@@ -118,7 +118,7 @@ class TestListTeams:
         db_session.commit()
 
         # List teams - should be empty for our user
-        response = client.get("/teams", headers=auth_headers)
+        response = client.get("api/v1/teams", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []
 
@@ -139,7 +139,7 @@ class TestGetTeam:
         db_session.add(member)
         db_session.commit()
 
-        response = client.get(f"/teams/{team.id}", headers=auth_headers)
+        response = client.get(f"api/v1/teams/{team.id}", headers=auth_headers)
         assert response.status_code == 200
         assert response.json()["name"] == "test-team"
 
@@ -158,12 +158,12 @@ class TestGetTeam:
         db_session.add(team)
         db_session.commit()
 
-        response = client.get(f"/teams/{team.id}", headers=auth_headers)
+        response = client.get(f"api/v1/teams/{team.id}", headers=auth_headers)
         assert response.status_code == 403
 
     def test_get_team_not_found(self, client, auth_headers):
         """Test getting a nonexistent team."""
-        response = client.get("/teams/nonexistent-id", headers=auth_headers)
+        response = client.get("api/v1/teams/nonexistent-id", headers=auth_headers)
         assert response.status_code == 404
 
 
@@ -195,7 +195,7 @@ class TestAddTeamMember:
 
         # Add member
         response = client.post(
-            f"/teams/{team.id}/members",
+            f"api/v1/teams/{team.id}/members",
             json={"email": "newuser@example.com", "role": "member"},
             headers=auth_headers,
         )
@@ -221,7 +221,7 @@ class TestAddTeamMember:
 
         # Try to add member - should fail
         response = client.post(
-            f"/teams/{team.id}/members",
+            f"api/v1/teams/{team.id}/members",
             json={"email": "newuser@example.com", "role": "member"},
             headers=auth_headers,
         )
@@ -243,7 +243,7 @@ class TestAddTeamMember:
         db_session.commit()
 
         response = client.post(
-            f"/teams/{team.id}/members",
+            f"api/v1/teams/{team.id}/members",
             json={"email": "nonexistent@example.com", "role": "member"},
             headers=auth_headers,
         )
@@ -266,7 +266,7 @@ class TestAddTeamMember:
 
         # Try to add owner again
         response = client.post(
-            f"/teams/{team.id}/members",
+            f"api/v1/teams/{team.id}/members",
             json={"email": "test@example.com", "role": "member"},
             headers=auth_headers,
         )
@@ -310,7 +310,7 @@ class TestRemoveTeamMember:
 
         # Remove member
         response = client.delete(
-            f"/teams/{team.id}/members/{member_user_id}", headers=auth_headers
+            f"api/v1/teams/{team.id}/members/{member_user_id}", headers=auth_headers
         )
         assert response.status_code == 204
 
@@ -331,7 +331,7 @@ class TestRemoveTeamMember:
 
         # Try to remove self
         response = client.delete(
-            f"/teams/{team.id}/members/{user.id}", headers=auth_headers
+            f"api/v1/teams/{team.id}/members/{user.id}", headers=auth_headers
         )
         assert response.status_code == 400
 
@@ -349,7 +349,7 @@ class TestRemoveTeamMember:
         db_session.commit()
 
         response = client.delete(
-            f"/teams/{team.id}/members/nonexistent-id", headers=auth_headers
+            f"api/v1/teams/{team.id}/members/nonexistent-id", headers=auth_headers
         )
         assert response.status_code in [204, 404]
 
@@ -370,7 +370,7 @@ class TestListTeamMembers:
         db_session.add(member)
         db_session.commit()
 
-        response = client.get(f"/teams/{team.id}/members", headers=auth_headers)
+        response = client.get(f"api/v1/teams/{team.id}/members", headers=auth_headers)
         assert response.status_code == 200
         members = response.json()
         assert len(members) == 1
@@ -391,7 +391,7 @@ class TestListTeamMembers:
         db_session.add(team)
         db_session.commit()
 
-        response = client.get(f"/teams/{team.id}/members", headers=auth_headers)
+        response = client.get(f"api/v1/teams/{team.id}/members", headers=auth_headers)
         assert response.status_code == 403
 
 

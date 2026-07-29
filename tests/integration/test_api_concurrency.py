@@ -46,7 +46,7 @@ class TestConcurrentGrantCreation:
         def create_grant(i):
             try:
                 response = client.post(
-                    "/grants",
+                    "api/v1/grants",
                     json={"cluster_name": f"cluster-{i}", "role": "view"},
                     headers=auth_headers,
                 )
@@ -69,7 +69,7 @@ class TestConcurrentGrantCreation:
         assert all(s == 201 for s in results)
 
         # List grants - should have all 10
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         grants = response.json()
         assert len(grants) == 10
 
@@ -94,7 +94,7 @@ class TestConcurrentGrantCreation:
         results = []
 
         def list_grants():
-            response = client.get("/grants", headers=auth_headers)
+            response = client.get("api/v1/grants", headers=auth_headers)
             return response.status_code, len(response.json())
 
         # List grants concurrently
@@ -143,7 +143,7 @@ class TestConcurrentRevocation:
         results = []
 
         def revoke_grant():
-            response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+            response = client.delete(f"api/v1/grants/{grant_id}", headers=auth_headers)
             return response.status_code
 
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -177,7 +177,7 @@ class TestRaceConditionPrevention:
 
         def create_grant():
             response = client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": "same-cluster", "role": "view"},
                 headers=auth_headers,
             )
@@ -225,12 +225,14 @@ class TestRaceConditionPrevention:
         results = {"revoke": None, "download": None}
 
         def revoke():
-            response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+            response = client.delete(f"api/v1/grants/{grant_id}", headers=auth_headers)
             results["revoke"] = response.status_code
 
         def download():
             time.sleep(0.1)  # Slight delay to ensure revoke happens first
-            response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
+            response = client.get(
+                f"api/v1/grants/{grant_id}/download", headers=auth_headers
+            )
             results["download"] = response.status_code
 
         thread1 = threading.Thread(target=revoke)
@@ -270,7 +272,7 @@ class TestBulkOperations:
         created = 0
         for i in range(batch_size):
             response = client.post(
-                "/grants",
+                "api/v1/grants",
                 json={
                     "cluster_name": f"cluster-{i}",
                     "namespace": f"ns-{i % 5}",
@@ -289,7 +291,7 @@ class TestBulkOperations:
         os.unlink(kubeconfig_path)
 
         # Verify all created grants exist
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         grants = response.json()
         assert len(grants) == created
 
@@ -312,7 +314,7 @@ class TestBulkOperations:
         db_session.commit()
 
         # Get audit log
-        response = client.get("/audit", headers=auth_headers)
+        response = client.get("api/v1/audit", headers=auth_headers)
 
         # Should return results (may be limited to 100)
         assert response.status_code == 200

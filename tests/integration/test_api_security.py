@@ -42,7 +42,7 @@ class TestSQLInjectionPrevention:
 
         for email in malicious_emails:
             response = client.post(
-                "/users", json={"email": email, "password": "testpassword123"}
+                "api/v1/users", json={"email": email, "password": "testpassword123"}
             )
             # Should either succeed (if email is valid format) or fail with validation error
             # Should NOT cause server error or SQL syntax error
@@ -71,7 +71,8 @@ class TestSQLInjectionPrevention:
 
         for password in malicious_passwords:
             response = client.post(
-                "/login", json={"email": "normal@example.com", "password": password}
+                "api/v1/login",
+                json={"email": "normal@example.com", "password": password},
             )
             # Should fail with auth error, not server error
             assert response.status_code == 401
@@ -94,7 +95,7 @@ class TestSQLInjectionPrevention:
 
         for cluster_name in malicious_names:
             response = client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": cluster_name, "role": "view"},
                 headers=auth_headers,
             )
@@ -126,7 +127,7 @@ class TestInputValidation:
 
         for email in invalid_emails:
             response = client.post(
-                "/users", json={"email": email, "password": "testpassword123"}
+                "api/v1/users", json={"email": email, "password": "testpassword123"}
             )
             assert response.status_code == 422, f"Should reject invalid email: {email}"
 
@@ -135,7 +136,7 @@ class TestInputValidation:
         # Create very long email
         long_email = "a" * 200 + "@example.com"
         response = client.post(
-            "/users", json={"email": long_email, "password": "testpassword123"}
+            "api/v1/users", json={"email": long_email, "password": "testpassword123"}
         )
         # Pydantic should handle this
         assert response.status_code in [201, 422]
@@ -153,7 +154,7 @@ class TestInputValidation:
         # Very long cluster name
         long_name = "a" * 300
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": long_name, "role": "view"},
             headers=auth_headers,
         )
@@ -186,7 +187,7 @@ class TestInputValidation:
 
         for ns in namespaces:
             response = client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": "test", "namespace": ns, "role": "view"},
                 headers=auth_headers,
             )
@@ -212,13 +213,13 @@ class TestAuthenticationSecurity:
 
         for token in invalid_tokens:
             headers = {"Authorization": f"Bearer {token}"} if token else {}
-            response = client.get("/grants", headers=headers)
+            response = client.get("api/v1/grants", headers=headers)
             assert response.status_code == 401
 
     def test_token_without_bearer_prefix(self, client, auth_token):
         """Test token without Bearer prefix."""
         headers = {"Authorization": auth_token}
-        response = client.get("/grants", headers=headers)
+        response = client.get("api/v1/grants", headers=headers)
         # Should fail without Bearer prefix
         assert response.status_code == 401
 
@@ -228,7 +229,7 @@ class TestAuthenticationSecurity:
         expired_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiZXhwIjoxNjAwMDAwMDAwfQ.invalid"
 
         response = client.get(
-            "/grants", headers={"Authorization": f"Bearer {expired_token}"}
+            "api/v1/grants", headers={"Authorization": f"Bearer {expired_token}"}
         )
         assert response.status_code == 401
 
@@ -255,7 +256,8 @@ class TestAuthorizationSecurity:
 
         # Login as user1
         response = client.post(
-            "/login", json={"email": "user1@example.com", "password": "password123"}
+            "api/v1/login",
+            json={"email": "user1@example.com", "password": "password123"},
         )
         user1_token = response.json()["access_token"]
 
@@ -271,7 +273,7 @@ class TestAuthorizationSecurity:
         os.environ["KUBECONFIG"] = kubeconfig_path
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "user1-cluster", "role": "view"},
             headers={"Authorization": f"Bearer {user1_token}"},
         )
@@ -296,7 +298,7 @@ class TestAuthorizationSecurity:
 
         # User1 tries to access User2's grant
         response = client.get(
-            f"/grants/{grant.id}/download",
+            f"api/v1/grants/{grant.id}/download",
             headers={"Authorization": f"Bearer {user1_token}"},
         )
 
@@ -320,7 +322,7 @@ class TestRateLimiting:
         # Try multiple wrong passwords
         for i in range(10):
             response = client.post(
-                "/login",
+                "api/v1/login",
                 json={"email": "test@example.com", "password": "wrongpassword"},
             )
             assert response.status_code == 401
@@ -335,7 +337,7 @@ class TestDataLeakage:
     def test_password_not_in_response(self, client):
         """Test that passwords are not returned in responses."""
         response = client.post(
-            "/users",
+            "api/v1/users",
             json={"email": "test@example.com", "password": "secretpassword123"},
         )
 
@@ -363,7 +365,7 @@ class TestDataLeakage:
 
         # Create grant
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "view"},
             headers=auth_headers,
         )
@@ -371,7 +373,7 @@ class TestDataLeakage:
         os.unlink(kubeconfig_path)
 
         # List grants - should not include raw kubeconfig
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         data = response.json()
 
         for grant in data:

@@ -206,14 +206,16 @@ def auth_token(client, db_session):
     # Login to get token — reset rate limiter first, retry once if rate-limited
     _reset_rate_limiter()
     response = client.post(
-        "/login", json={"email": "test@example.com", "password": "testpassword123"}
+        "/api/v1/login",
+        json={"email": "test@example.com", "password": "testpassword123"},
     )
     data = response.json()
     if response.status_code == 429 or "access_token" not in data:
         # Rate-limited; reset and retry once
         _reset_rate_limiter()
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "/api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         data = response.json()
     return data["access_token"]

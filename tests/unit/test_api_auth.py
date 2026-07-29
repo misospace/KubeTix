@@ -28,7 +28,7 @@ class TestUserRegistration:
     def test_register_new_user(self, client):
         """Test registering a new user."""
         response = client.post(
-            "/users",
+            "api/v1/users",
             json={
                 "email": "test@example.com",
                 "password": "testpassword123",
@@ -56,7 +56,8 @@ class TestUserRegistration:
 
         # Try to register again
         response = client.post(
-            "/users", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/users",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         assert response.status_code == 400
         assert "already registered" in response.json()["detail"].lower()
@@ -64,24 +65,25 @@ class TestUserRegistration:
     def test_register_invalid_email(self, client):
         """Test registering with invalid email."""
         response = client.post(
-            "/users", json={"email": "not-an-email", "password": "testpassword123"}
+            "api/v1/users",
+            json={"email": "not-an-email", "password": "testpassword123"},
         )
         assert response.status_code == 422
 
     def test_register_missing_email(self, client):
         """Test registering without email."""
-        response = client.post("/users", json={"password": "testpassword123"})
+        response = client.post("api/v1/users", json={"password": "testpassword123"})
         assert response.status_code == 422
 
     def test_register_missing_password(self, client):
         """Test registering without password."""
-        response = client.post("/users", json={"email": "test@example.com"})
+        response = client.post("api/v1/users", json={"email": "test@example.com"})
         assert response.status_code == 422
 
     def test_register_short_password(self, client):
         """Test registering with short password."""
         response = client.post(
-            "/users", json={"email": "test@example.com", "password": "short"}
+            "api/v1/users", json={"email": "test@example.com", "password": "short"}
         )
         # Should accept short passwords (no validation) - but test documents behavior
         assert response.status_code in [201, 422]
@@ -102,7 +104,8 @@ class TestUserLogin:
 
         # Login
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -123,7 +126,8 @@ class TestUserLogin:
 
         # Login with wrong password
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "wrongpassword"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "wrongpassword"},
         )
         assert response.status_code == 401
         assert "incorrect" in response.json()["detail"].lower()
@@ -131,19 +135,19 @@ class TestUserLogin:
     def test_login_nonexistent_user(self, client):
         """Test login with nonexistent user."""
         response = client.post(
-            "/login",
+            "api/v1/login",
             json={"email": "nonexistent@example.com", "password": "testpassword123"},
         )
         assert response.status_code == 401
 
     def test_login_missing_email(self, client):
         """Test login without email."""
-        response = client.post("/login", json={"password": "testpassword123"})
+        response = client.post("api/v1/login", json={"password": "testpassword123"})
         assert response.status_code == 422
 
     def test_login_missing_password(self, client):
         """Test login without password."""
-        response = client.post("/login", json={"email": "test@example.com"})
+        response = client.post("api/v1/login", json={"email": "test@example.com"})
         assert response.status_code == 422
 
 
@@ -152,7 +156,7 @@ class TestHealthEndpoint:
 
     def test_health_check(self, client):
         """Test health endpoint returns healthy status."""
-        response = client.get("/health")
+        response = client.get("api/v1/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
@@ -165,7 +169,8 @@ class TestPasswordHashing:
     def test_password_not_stored_plaintext(self, client, db_session):
         """Test that passwords are not stored in plaintext."""
         response = client.post(
-            "/users", json={"email": "test@example.com", "password": "mysecretpassword"}
+            "api/v1/users",
+            json={"email": "test@example.com", "password": "mysecretpassword"},
         )
         assert response.status_code == 201
 
