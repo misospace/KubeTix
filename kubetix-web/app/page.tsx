@@ -71,7 +71,7 @@ const CREDENTIALS = { withCredentials: true } as const
 
 async function apiLogin(email: string, password: string): Promise<AuthToken> {
   const apiUrl = getApiUrl()
-  const resp = await axios.post(`${apiUrl}/login`, { email, password }, CREDENTIALS)
+  const resp = await axios.post(`${apiUrl}/api/v1/login`, { email, password }, CREDENTIALS)
   // The token is only kept in an httpOnly cookie. We deliberately do NOT
   // read it here; the cookie is sent automatically by the browser.
   return resp.data
@@ -81,7 +81,7 @@ async function apiLogout(): Promise<void> {
   const apiUrl = getApiUrl()
   if (apiUrl) {
     try {
-      await axios.post(`${apiUrl}/auth/logout`, {}, CREDENTIALS)
+      await axios.post(`${apiUrl}/api/v1/auth/logout`, {}, CREDENTIALS)
     } catch {
       // Best-effort: proceed with local cleanup even if server call fails
     }
@@ -90,7 +90,7 @@ async function apiLogout(): Promise<void> {
 
 async function fetchGrants(): Promise<Grant[]> {
   const apiUrl = getApiUrl()
-  const resp = await axios.get(`${apiUrl}/grants`, CREDENTIALS)
+  const resp = await axios.get(`${apiUrl}/api/v1/grants`, CREDENTIALS)
   return resp.data
 }
 
@@ -101,13 +101,13 @@ async function createGrant(payload: {
   expiry_hours: number
 }): Promise<Grant> {
   const apiUrl = getApiUrl()
-  const resp = await axios.post(`${apiUrl}/grants`, payload, CREDENTIALS)
+  const resp = await axios.post(`${apiUrl}/api/v1/grants`, payload, CREDENTIALS)
   return resp.data
 }
 
 async function revokeGrant(grantId: string): Promise<void> {
   const apiUrl = getApiUrl()
-  await axios.delete(`${apiUrl}/grants/${grantId}`, CREDENTIALS)
+  await axios.delete(`${apiUrl}/api/v1/grants/${grantId}`, CREDENTIALS)
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ export default function Home() {
     // sent automatically; a 401 means the user is not signed in.
     try {
       const apiUrl = getApiUrl()
-      const resp = await axios.get(`${apiUrl}/users/me`, CREDENTIALS)
+      const resp = await axios.get(`${apiUrl}/api/v1/users/me`, CREDENTIALS)
       setCurrentUser(resp.data)
       setIsLoggedIn(true)
 

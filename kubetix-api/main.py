@@ -145,6 +145,13 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# ---------------------------------------------------------------------------
+# Versioned router for /api/v1/* routes
+# ---------------------------------------------------------------------------
+from fastapi import APIRouter
+
+v1_router = APIRouter(prefix="/api/v1")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -196,7 +203,9 @@ from kubetix_api.schemas import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-@app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@v1_router.post(
+    "/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
 @limiter.limit("5 per hour")
 async def register_user(
     request: Request,
@@ -224,7 +233,7 @@ async def register_user(
     return new_user
 
 
-@app.post("/login", response_model=Token)
+@v1_router.post("/login", response_model=Token)
 @limiter.limit("10 per minute")
 async def login(
     request: Request,
@@ -266,7 +275,7 @@ async def login(
     }
 
 
-@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+@v1_router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("10 per minute")
 async def logout(
     request: Request,
@@ -303,7 +312,7 @@ async def logout(
             db.close()
 
 
-@app.get("/users/me", response_model=UserResponse)
+@v1_router.get("/users/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return current_user
 
@@ -321,7 +330,7 @@ from kubetix_api.grants import (  # noqa: E402
 )
 
 
-@app.get("/grants", response_model=List[GrantResponse])
+@v1_router.get("/grants", response_model=List[GrantResponse])
 @limiter.limit("10 per minute")
 async def list_grants(
     request: Request, current_user: User = Depends(get_current_user), db=Depends(get_db)
@@ -329,7 +338,9 @@ async def list_grants(
     return list_grants_for_user(current_user, db)
 
 
-@app.post("/grants", response_model=GrantResponse, status_code=status.HTTP_201_CREATED)
+@v1_router.post(
+    "/grants", response_model=GrantResponse, status_code=status.HTTP_201_CREATED
+)
 @limiter.limit("10 per hour")
 async def create_grant_endpoint(
     request: Request,
@@ -340,7 +351,7 @@ async def create_grant_endpoint(
     return create_grant(grant_data, current_user, db)
 
 
-@app.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
+@v1_router.get("/grants/{grant_id}/download", response_model=GrantWithKubeconfig)
 @limiter.limit("10 per minute")
 async def download_grant(
     request: Request,
@@ -351,7 +362,7 @@ async def download_grant(
     return get_grant(grant_id, current_user, db)
 
 
-@app.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
+@v1_router.delete("/grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("5 per minute")
 async def revoke_grant_endpoint(
     request: Request,
@@ -362,7 +373,7 @@ async def revoke_grant_endpoint(
     revoke_grant(grant_id, current_user, db)
 
 
-@app.get("/audit", response_model=List[dict])
+@v1_router.get("/audit", response_model=List[dict])
 async def get_audit_log_endpoint(
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -384,7 +395,9 @@ from kubetix_api.teams import (  # noqa: E402
 )
 
 
-@app.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
+@v1_router.post(
+    "/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_team_endpoint(
     team_data: TeamCreate,
     current_user: User = Depends(get_current_user),
@@ -393,7 +406,7 @@ async def create_team_endpoint(
     return create_team(team_data, current_user, db)
 
 
-@app.get("/teams", response_model=List[TeamResponse])
+@v1_router.get("/teams", response_model=List[TeamResponse])
 async def list_teams_endpoint(
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -401,7 +414,7 @@ async def list_teams_endpoint(
     return list_teams(current_user, db)
 
 
-@app.get("/teams/{team_id}", response_model=TeamResponse)
+@v1_router.get("/teams/{team_id}", response_model=TeamResponse)
 async def get_team_endpoint(
     team_id: str,
     current_user: User = Depends(get_current_user),
@@ -410,7 +423,7 @@ async def get_team_endpoint(
     return get_team(team_id, current_user, db)
 
 
-@app.post("/teams/{team_id}/members", response_model=TeamMemberResponse)
+@v1_router.post("/teams/{team_id}/members", response_model=TeamMemberResponse)
 async def add_team_member_endpoint(
     team_id: str,
     member_data: TeamMemberCreate,
@@ -420,7 +433,7 @@ async def add_team_member_endpoint(
     return add_team_member(team_id, member_data, current_user, db)
 
 
-@app.delete(
+@v1_router.delete(
     "/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 async def remove_team_member_endpoint(
@@ -434,7 +447,7 @@ async def remove_team_member_endpoint(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
+@v1_router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
 async def list_team_members_endpoint(
     team_id: str,
     current_user: User = Depends(get_current_user),
@@ -456,7 +469,7 @@ from kubetix_api.oidc import (  # noqa: E402
 )
 
 
-@app.post("/auth/sso/callback")
+@v1_router.post("/auth/sso/callback")
 @limiter.limit("5 per minute")
 async def sso_callback(
     request: Request,
@@ -637,7 +650,7 @@ async def sso_callback(
     return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
 
-@app.get("/auth/sso/{provider}/login")
+@v1_router.get("/auth/sso/{provider}/login")
 async def sso_login(
     provider: str,
     db=Depends(get_db),
@@ -714,7 +727,7 @@ async def sso_login(
     }
 
 
-@app.post("/auth/oidc/callback")
+@v1_router.post("/auth/oidc/callback")
 @limiter.limit("5 per minute")
 async def oidc_callback(
     request: Request,
@@ -799,7 +812,7 @@ async def oidc_callback(
     return {"access_token": access_token_jwt, "token_type": "bearer", "user": user}
 
 
-@app.get("/auth/oidc/login")
+@v1_router.get("/auth/oidc/login")
 async def oidc_login(
     db=Depends(get_db),
 ):
@@ -843,7 +856,7 @@ async def oidc_login(
     }
 
 
-@app.get("/auth/oidc/userinfo")
+@v1_router.get("/auth/oidc/userinfo")
 async def oidc_userinfo(current_user: User = Depends(get_current_user)):
     """Get current user info with OIDC attributes."""
     return {
@@ -860,6 +873,82 @@ async def oidc_userinfo(current_user: User = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/health")
+@v1_router.get("/health")
 async def health_check():
     return {"status": "healthy", "version": "0.1.0"}
+
+
+# ---------------------------------------------------------------------------
+# Mount versioned router
+# ---------------------------------------------------------------------------
+app.include_router(v1_router)
+
+# ---------------------------------------------------------------------------
+# Backward-compatible redirects (301) from old bare paths to /api/v1/*
+# ---------------------------------------------------------------------------
+from fastapi.responses import RedirectResponse
+
+
+@app.get("/health")
+async def redirect_health():
+    return RedirectResponse(url="/api/v1/health", status_code=301)
+
+
+@app.post("/login")
+async def redirect_login():
+    return RedirectResponse(url="/api/v1/login", status_code=301)
+
+
+@app.post("/auth/logout")
+async def redirect_logout():
+    return RedirectResponse(url="/api/v1/auth/logout", status_code=301)
+
+
+@app.get("/users")
+async def redirect_users():
+    return RedirectResponse(url="/api/v1/users", status_code=301)
+
+
+@app.post("/users")
+async def redirect_create_user():
+    return RedirectResponse(url="/api/v1/users", status_code=301)
+
+
+@app.get("/grants")
+async def redirect_grants_list():
+    return RedirectResponse(url="/api/v1/grants", status_code=301)
+
+
+@app.post("/grants")
+async def redirect_create_grant():
+    return RedirectResponse(url="/api/v1/grants", status_code=301)
+
+
+@app.get("/audit")
+async def redirect_audit():
+    return RedirectResponse(url="/api/v1/audit", status_code=301)
+
+
+@app.post("/teams")
+async def redirect_create_team():
+    return RedirectResponse(url="/api/v1/teams", status_code=301)
+
+
+@app.get("/auth/sso/callback")
+async def redirect_sso_callback():
+    return RedirectResponse(url="/api/v1/auth/sso/callback", status_code=301)
+
+
+@app.post("/auth/sso/callback")
+async def redirect_sso_callback_post():
+    return RedirectResponse(url="/api/v1/auth/sso/callback", status_code=301)
+
+
+@app.get("/auth/oidc/callback")
+async def redirect_oidc_callback():
+    return RedirectResponse(url="/api/v1/auth/oidc/callback", status_code=301)
+
+
+@app.post("/auth/oidc/callback")
+async def redirect_oidc_callback_post():
+    return RedirectResponse(url="/api/v1/auth/oidc/callback", status_code=301)

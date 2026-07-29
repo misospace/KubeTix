@@ -534,7 +534,7 @@ def sync_to_api(api_url: str, token: Optional[str]) -> None:
             "metadata": metadata,
             "encrypted_kubeconfig": encrypted_kubeconfig,
         }
-        url = api_url.rstrip("/") + f"/grants/{grant_id}"
+        url = api_url.rstrip("/") + f"/api/v1/grants/{grant_id}"
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),

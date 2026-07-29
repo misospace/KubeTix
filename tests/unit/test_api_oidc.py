@@ -50,7 +50,7 @@ class TestOIDCEndpoints:
 
     def test_oidc_login_redirect(self, client, mock_oidc_env):
         """Test OIDC login endpoint returns auth URL."""
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
 
         assert response.status_code == 200
         data = response.json()
@@ -59,7 +59,7 @@ class TestOIDCEndpoints:
 
     def test_oidc_login_requires_config(self, client):
         """Test OIDC login fails without configuration."""
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
 
         # Without env vars, should fail with 400 (Bad Request)
         assert response.status_code == 400
@@ -67,7 +67,7 @@ class TestOIDCEndpoints:
 
     def test_oidc_callback_without_code(self, client):
         """Test OIDC callback without code fails."""
-        response = client.post("/auth/oidc/callback")
+        response = client.post("api/v1/auth/oidc/callback")
 
         # Should fail validation (missing 'code' field)
         assert response.status_code == 422
@@ -77,21 +77,21 @@ class TestOIDCEndpoints:
         providers = ["google", "github", "okta", "azure-ad", "authentik"]
 
         for provider in providers:
-            response = client.get(f"/auth/sso/{provider}/login")
+            response = client.get(f"api/v1/auth/sso/{provider}/login")
 
             # Without env vars, should fail with 400 (not configured)
             assert response.status_code == 400
 
     def test_sso_invalid_provider(self, client):
         """Test using invalid SSO provider."""
-        response = client.get("/auth/sso/invalid-provider/login")
+        response = client.get("api/v1/auth/sso/invalid-provider/login")
 
         assert response.status_code == 400
         assert "unsupported" in response.json()["detail"].lower()
 
     def test_oidc_userinfo_unauthorized(self, client):
         """Test OIDC userinfo requires authentication."""
-        response = client.get("/auth/oidc/userinfo")
+        response = client.get("api/v1/auth/oidc/userinfo")
 
         assert response.status_code == 401
 
@@ -100,7 +100,7 @@ class TestOIDCEndpoints:
         # This test would require a valid JWT token
         # Just verify the endpoint exists
         response = client.get(
-            "/auth/oidc/userinfo", headers={"Authorization": "Bearer test-token"}
+            "api/v1/auth/oidc/userinfo", headers={"Authorization": "Bearer test-token"}
         )
 
         # Should fail with auth error, not 404
@@ -112,7 +112,7 @@ class TestOIDCSecurity:
 
     def test_oidc_redirect_uri_validation(self, client, mock_oidc_env):
         """Test OIDC redirect URI is validated."""
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
 
         data = response.json()
         auth_url = data.get("auth_url", "")
@@ -122,7 +122,7 @@ class TestOIDCSecurity:
 
     def test_oidc_scopes_included(self, client, mock_oidc_env):
         """Test OIDC scopes are included in auth request."""
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
 
         data = response.json()
         auth_url = data.get("auth_url", "")
@@ -132,7 +132,7 @@ class TestOIDCSecurity:
 
     def test_oidc_client_id_included(self, client, mock_oidc_env):
         """Test OIDC client ID is included in auth request."""
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
 
         data = response.json()
         auth_url = data.get("auth_url", "")
@@ -146,7 +146,7 @@ class TestOAuthProviders:
 
     def test_google_oauth_initiation(self, client, mock_google_sso_env):
         """Test Google OAuth flow initiation."""
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
 
         assert response.status_code == 200
         data = response.json()
@@ -156,7 +156,7 @@ class TestOAuthProviders:
 
     def test_github_oauth_initiation(self, client, mock_github_sso_env):
         """Test GitHub OAuth flow initiation."""
-        response = client.get("/auth/sso/github/login")
+        response = client.get("api/v1/auth/sso/github/login")
 
         assert response.status_code == 200
         data = response.json()
@@ -166,7 +166,7 @@ class TestOAuthProviders:
 
     def test_okta_oauth_initiation(self, client, mock_okta_sso_env):
         """Test Okta OAuth flow initiation."""
-        response = client.get("/auth/sso/okta/login")
+        response = client.get("api/v1/auth/sso/okta/login")
 
         assert response.status_code == 200
         data = response.json()
@@ -180,7 +180,9 @@ class TestCORSLocking:
 
     def test_cors_default_origin(self, client):
         """Test CORS defaults to localhost:3000 when no env var set."""
-        response = client.get("/health", headers={"Origin": "http://localhost:3000"})
+        response = client.get(
+            "api/v1/health", headers={"Origin": "http://localhost:3000"}
+        )
 
         assert response.status_code == 200
         # With allow_credentials=True and explicit origin, Access-Control-Allow-Origin should match
@@ -191,7 +193,9 @@ class TestCORSLocking:
 
     def test_cors_rejects_unknown_origin(self, client):
         """Test CORS rejects unknown origins (no wildcard)."""
-        response = client.get("/health", headers={"Origin": "https://evil.example.com"})
+        response = client.get(
+            "api/v1/health", headers={"Origin": "https://evil.example.com"}
+        )
 
         assert response.status_code == 200
         # With explicit origins and no match, Access-Control-Allow-Origin should be empty
@@ -257,7 +261,7 @@ class TestSSORoundTrip:
         from unittest.mock import patch
 
         # 1. Initiate login
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -288,7 +292,7 @@ class TestSSORoundTrip:
         ):
             # 4. Call the callback endpoint with the same state (auth_code_id)
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-auth-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-auth-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
 
@@ -308,7 +312,7 @@ class TestSSORoundTrip:
         from unittest.mock import patch
 
         # 1. Initiate login
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -333,7 +337,7 @@ class TestSSORoundTrip:
             },
         ):
             response = client.post(
-                "/auth/oidc/callback?code=fake-auth-code"
+                "api/v1/auth/oidc/callback?code=fake-auth-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
 
@@ -348,7 +352,7 @@ class TestSSORoundTrip:
     def test_sso_callback_rejects_wrong_state(self, client, mock_google_sso_env):
         """Test that callback rejects a state value that doesn't match any record."""
         response = client.post(
-            "/auth/sso/callback?provider=google&code=fake-auth-code"
+            "api/v1/auth/sso/callback?provider=google&code=fake-auth-code"
             "&state=nonexistent-state&code_verifier=some-verifier"
         )
         assert response.status_code == 400
@@ -362,7 +366,7 @@ class TestSSORoundTrip:
         from unittest.mock import patch
 
         # 1. Initiate login
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -387,7 +391,7 @@ class TestSSORoundTrip:
             "httpx.get", return_value=mock_userinfo_resp
         ):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
         assert response.status_code == 200
@@ -397,7 +401,7 @@ class TestSSORoundTrip:
             "httpx.get", return_value=mock_userinfo_resp
         ):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
         assert response.status_code == 400
@@ -414,7 +418,7 @@ class TestSSORoundTrip:
         from unittest.mock import patch
 
         # 1. Initiate login — get csrf_state and code_verifier
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -436,7 +440,7 @@ class TestSSORoundTrip:
         )
         with patch("httpx.post", return_value=mock_token_resp):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state=attacker-controlled-state&code_verifier={code_verifier}"
             )
         assert response.status_code == 400
@@ -450,7 +454,7 @@ class TestSSORoundTrip:
             "httpx.get", return_value=mock_userinfo_resp
         ):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
         assert response.status_code == 200
@@ -467,7 +471,7 @@ class TestSSOErrorHandling:
         from unittest.mock import patch
 
         # 1. Initiate login — get csrf_state and code_verifier
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -480,7 +484,7 @@ class TestSSOErrorHandling:
         )
         with patch("httpx.post", return_value=mock_token_resp):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
 
@@ -503,7 +507,7 @@ class TestSSOErrorHandling:
         from unittest.mock import patch
 
         # 1. Initiate login — get csrf_state and code_verifier
-        response = client.get("/auth/sso/google/login")
+        response = client.get("api/v1/auth/sso/google/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -532,7 +536,7 @@ class TestSSOErrorHandling:
             "httpx.get", side_effect=lambda *a, **kw: mock_request("GET", *a, **kw)
         ):
             response = client.post(
-                "/auth/sso/callback?provider=google&code=fake-code"
+                "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
 
@@ -555,7 +559,7 @@ class TestSSOErrorHandling:
         from unittest.mock import patch
 
         # 1. Initiate login — get csrf_state and code_verifier
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -570,7 +574,7 @@ class TestSSOErrorHandling:
 
         with patch("httpx.post", side_effect=mock_post):
             response = client.post(
-                "/auth/oidc/callback?code=fake-code"
+                "api/v1/auth/oidc/callback?code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
 
@@ -589,7 +593,7 @@ class TestSSOErrorHandling:
         from unittest.mock import patch
 
         # 1. Initiate login — get csrf_state and code_verifier
-        response = client.get("/auth/oidc/login")
+        response = client.get("api/v1/auth/oidc/login")
         assert response.status_code == 200
         login_data = response.json()
         code_verifier = login_data["code_verifier"]
@@ -614,7 +618,7 @@ class TestSSOErrorHandling:
             "httpx.get", side_effect=mock_get
         ):
             response = client.post(
-                "/auth/oidc/callback?code=fake-code"
+                "api/v1/auth/oidc/callback?code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
 

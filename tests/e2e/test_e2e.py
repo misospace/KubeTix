@@ -22,7 +22,7 @@ def wait_for_service_ready(url: str, timeout: int = 120):
     start = time.time()
     while time.time() - start < timeout:
         try:
-            response = requests.get(f"{url}/health", timeout=5)
+            response = requests.get(f"{url}/api/v1/health", timeout=5)
             if response.status_code == 200:
                 return True
         except requests.exceptions.RequestException:
@@ -62,7 +62,7 @@ class TestKubeTixE2E:
 
     def test_01_api_health(self, wait_for_api):
         """Test API health endpoint."""
-        response = requests.get(f"{wait_for_api}/health")
+        response = requests.get(f"{wait_for_api}/api/v1/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
@@ -70,7 +70,7 @@ class TestKubeTixE2E:
     def test_02_user_registration(self, wait_for_api):
         """Test user registration."""
         response = requests.post(
-            f"{wait_for_api}/users",
+            f"{wait_for_api}/api/v1/users",
             json={
                 "email": "test@example.com",
                 "password": "testpassword123",
@@ -87,12 +87,12 @@ class TestKubeTixE2E:
     def test_03_user_login(self, wait_for_api):
         """Test user login and JWT token."""
         requests.post(
-            f"{wait_for_api}/users",
+            f"{wait_for_api}/api/v1/users",
             json={"email": "login-test@example.com", "password": "testpassword123"},
         )
 
         response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "login-test@example.com", "password": "testpassword123"},
         )
         assert response.status_code == 200
@@ -105,13 +105,13 @@ class TestKubeTixE2E:
     def test_04_create_grant(self, wait_for_api, kubeconfig):
         """Test creating a grant."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={
                 "cluster_name": "test-cluster",
                 "namespace": "default",
@@ -132,13 +132,14 @@ class TestKubeTixE2E:
     def test_05_list_grants(self, wait_for_api, kubeconfig):
         """Test listing grants."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.get(
-            f"{wait_for_api}/grants", headers={"Authorization": f"Bearer {token}"}
+            f"{wait_for_api}/api/v1/grants",
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
         grants = response.json()
@@ -147,13 +148,13 @@ class TestKubeTixE2E:
     def test_06_download_grant(self, wait_for_api, kubeconfig):
         """Test downloading a grant."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         create_response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={
                 "cluster_name": "download-test-cluster",
                 "namespace": "test-ns",
@@ -165,7 +166,7 @@ class TestKubeTixE2E:
         grant_id = create_response.json()["id"]
 
         response = requests.get(
-            f"{wait_for_api}/grants/{grant_id}/download",
+            f"{wait_for_api}/api/v1/grants/{grant_id}/download",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
@@ -179,13 +180,13 @@ class TestKubeTixE2E:
     def test_07_revoke_grant(self, wait_for_api, kubeconfig):
         """Test revoking a grant."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         create_response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={
                 "cluster_name": "revoke-test-cluster",
                 "namespace": "default",
@@ -197,13 +198,13 @@ class TestKubeTixE2E:
         grant_id = create_response.json()["id"]
 
         response = requests.delete(
-            f"{wait_for_api}/grants/{grant_id}",
+            f"{wait_for_api}/api/v1/grants/{grant_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 204
 
         response = requests.get(
-            f"{wait_for_api}/grants/{grant_id}/download",
+            f"{wait_for_api}/api/v1/grants/{grant_id}/download",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 400
@@ -212,13 +213,13 @@ class TestKubeTixE2E:
     def test_08_audit_log(self, wait_for_api, kubeconfig):
         """Test audit logging."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.get(
-            f"{wait_for_api}/audit", headers={"Authorization": f"Bearer {token}"}
+            f"{wait_for_api}/api/v1/audit", headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200
         logs = response.json()
@@ -227,32 +228,33 @@ class TestKubeTixE2E:
     def test_09_invalid_token(self, wait_for_api):
         """Test invalid token handling."""
         response = requests.get(
-            f"{wait_for_api}/grants", headers={"Authorization": "Bearer invalid-token"}
+            f"{wait_for_api}/api/v1/grants",
+            headers={"Authorization": "Bearer invalid-token"},
         )
         assert response.status_code == 401
 
     def test_10_unauthorized_access(self, wait_for_api):
         """Test unauthorized access to grants."""
-        response = requests.get(f"{wait_for_api}/grants")
+        response = requests.get(f"{wait_for_api}/api/v1/grants")
         assert response.status_code == 401
 
     def test_11_grant_expiry_validation(self, wait_for_api, kubeconfig):
         """Test grant expiry validation."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={"cluster_name": "test-cluster", "expiry_hours": 0},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 422
 
         response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={"cluster_name": "test-cluster", "expiry_hours": 1000},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -261,13 +263,13 @@ class TestKubeTixE2E:
     def test_12_invalid_role(self, wait_for_api, kubeconfig):
         """Test invalid role validation."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "invalid-role"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -276,13 +278,13 @@ class TestKubeTixE2E:
     def test_13_missing_kubeconfig(self, wait_for_api):
         """Test behavior when kubeconfig is missing."""
         login_response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = login_response.json()["access_token"]
 
         response = requests.post(
-            f"{wait_for_api}/grants",
+            f"{wait_for_api}/api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "view"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -290,12 +292,12 @@ class TestKubeTixE2E:
     def test_14_duplicate_user_registration(self, wait_for_api):
         """Test duplicate user registration handling."""
         requests.post(
-            f"{wait_for_api}/users",
+            f"{wait_for_api}/api/v1/users",
             json={"email": "duplicate@example.com", "password": "testpassword123"},
         )
 
         response = requests.post(
-            f"{wait_for_api}/users",
+            f"{wait_for_api}/api/v1/users",
             json={"email": "duplicate@example.com", "password": "testpassword123"},
         )
         assert response.status_code == 400
@@ -304,12 +306,12 @@ class TestKubeTixE2E:
     def test_15_wrong_password_login(self, wait_for_api):
         """Test login with wrong password."""
         requests.post(
-            f"{wait_for_api}/users",
+            f"{wait_for_api}/api/v1/users",
             json={"email": "wrongpass@example.com", "password": "correctpassword"},
         )
 
         response = requests.post(
-            f"{wait_for_api}/login",
+            f"{wait_for_api}/api/v1/login",
             json={"email": "wrongpass@example.com", "password": "wrongpassword"},
         )
         assert response.status_code == 401

@@ -30,11 +30,11 @@ class TestAuditLogEndpoint:
     """Tests for the /audit log endpoint."""
 
     def test_audit_log_unauthorized(self, client):
-        response = client.get("/audit")
+        response = client.get("api/v1/audit")
         assert response.status_code == 401
 
     def test_audit_log_empty_for_user(self, client, auth_headers):
-        response = client.get("/audit", headers=auth_headers)
+        response = client.get("api/v1/audit", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []
 
@@ -48,13 +48,13 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "audit-test-cluster", "role": "view"},
             headers=auth_headers,
         )
         os.unlink(kubeconfig_path)
         assert response.status_code == 201
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         assert audit_response.status_code == 200
         logs = audit_response.json()
         assert len(logs) >= 1
@@ -72,16 +72,18 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "revoke-test-cluster", "role": "view"},
             headers=auth_headers,
         )
-        grants_response = client.get("/grants", headers=auth_headers)
+        grants_response = client.get("api/v1/grants", headers=auth_headers)
         grant_id = grants_response.json()[0]["id"]
-        revoke_response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+        revoke_response = client.delete(
+            f"api/v1/grants/{grant_id}", headers=auth_headers
+        )
         assert revoke_response.status_code == 204
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         revoke_entries = [log for log in logs if log["action"] == "revoked"]
         assert len(revoke_entries) >= 1
@@ -96,18 +98,18 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "download-test-cluster", "role": "view"},
             headers=auth_headers,
         )
-        grants_response = client.get("/grants", headers=auth_headers)
+        grants_response = client.get("api/v1/grants", headers=auth_headers)
         grant_id = grants_response.json()[0]["id"]
         download_response = client.get(
-            f"/grants/{grant_id}/download", headers=auth_headers
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
         )
         assert download_response.status_code == 200
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         download_entries = [log for log in logs if log["action"] == "downloaded"]
         assert len(download_entries) >= 1
@@ -121,12 +123,12 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "fields-test-cluster", "role": "view"},
             headers=auth_headers,
         )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         assert len(logs) >= 1
         entry = logs[0]
@@ -142,12 +144,12 @@ class TestAuditLogEndpoint:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         for i in range(3):
             client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": f"ordering-cluster-{i}", "role": "view"},
                 headers=auth_headers,
             )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         assert len(logs) >= 3
         for i in range(len(logs) - 1):
@@ -162,12 +164,12 @@ class TestAuditLogEndpoint:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         for i in range(150):
             client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": f"limit-cluster-{i}", "role": "view"},
                 headers=auth_headers,
             )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         assert len(logs) <= 100
 
@@ -181,19 +183,19 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         admin_response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "admin-cluster", "role": "view"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert admin_response.status_code == 201
         user_response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "user-cluster", "role": "view"},
             headers=other_headers,
         )
         assert user_response.status_code == 201
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=other_headers)
+        audit_response = client.get("api/v1/audit", headers=other_headers)
         logs = audit_response.json()
         user_entries = [log for log in logs if "user-cluster" in log.get("details", "")]
         admin_entries = [
@@ -212,18 +214,18 @@ class TestAuditLogEndpoint:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         admin_response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "admin-audit-cluster", "role": "view"},
             headers=admin_headers,
         )
         assert admin_response.status_code == 201
         client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "user-audit-cluster", "role": "view"},
             headers={"Authorization": f"Bearer {other_token}"},
         )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=admin_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         admin_entries = [
             log for log in logs if "admin-audit-cluster" in log.get("details", "")
@@ -246,20 +248,22 @@ class TestAuditLogIntegration:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         create_response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "lifecycle-cluster", "role": "edit"},
             headers=auth_headers,
         )
         assert create_response.status_code == 201
         grant_id = create_response.json()["id"]
         download_response = client.get(
-            f"/grants/{grant_id}/download", headers=auth_headers
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
         )
         assert download_response.status_code == 200
         os.unlink(kubeconfig_path)
-        revoke_response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+        revoke_response = client.delete(
+            f"api/v1/grants/{grant_id}", headers=auth_headers
+        )
         assert revoke_response.status_code == 204
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         actions = [log["action"] for log in logs]
         assert "created" in actions
@@ -280,14 +284,14 @@ class TestAuditLogIntegration:
             kubeconfig_path = f.name
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
         create_response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "grant-id-test-cluster", "role": "view"},
             headers=auth_headers,
         )
         assert create_response.status_code == 201
         grant_id = create_response.json()["id"]
         os.unlink(kubeconfig_path)
-        audit_response = client.get("/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
         logs = audit_response.json()
         created_entry = next((log for log in logs if log["action"] == "created"), None)
         assert created_entry is not None

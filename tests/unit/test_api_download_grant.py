@@ -54,7 +54,9 @@ class TestDownloadGrant:
         db.add(grant)
         db.commit()
         grant_id = grant.id
-        response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
@@ -67,7 +69,7 @@ class TestDownloadGrant:
 
     def test_download_grant_not_found(self, client, auth_headers):
         response = client.get(
-            "/grants/nonexistent-id-12345/download", headers=auth_headers
+            "api/v1/grants/nonexistent-id-12345/download", headers=auth_headers
         )
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
@@ -98,7 +100,9 @@ class TestDownloadGrant:
         db.add(grant)
         db.commit()
         grant_id = grant.id
-        response = client.get(f"/grants/{grant_id}/download", headers=other_headers)
+        response = client.get(
+            f"api/v1/grants/{grant_id}/download", headers=other_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 403
         assert "not authorized" in response.json()["detail"].lower()
@@ -123,7 +127,9 @@ class TestDownloadGrant:
         )
         db.add(grant)
         db.commit()
-        response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant.id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 400
         assert "revoked" in response.json()["detail"].lower()
@@ -147,13 +153,15 @@ class TestDownloadGrant:
         )
         db.add(grant)
         db.commit()
-        response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant.id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 400
         assert "expired" in response.json()["detail"].lower()
 
     def test_download_grant_unauthorized(self, client):
-        response = client.get("/grants/some-id/download")
+        response = client.get("api/v1/grants/some-id/download")
         assert response.status_code == 401
 
     def test_download_grant_with_namespace(self, client, db, auth_headers, monkeypatch):
@@ -175,7 +183,9 @@ class TestDownloadGrant:
         )
         db.add(grant)
         db.commit()
-        response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant.id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
@@ -201,7 +211,9 @@ class TestDownloadGrant:
         )
         db.add(grant)
         db.commit()
-        response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant.id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()
@@ -228,7 +240,9 @@ class TestDownloadGrant:
         )
         db.add(grant)
         db.commit()
-        response = client.get(f"/grants/{grant.id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant.id}/download", headers=auth_headers
+        )
         os.unlink(kubeconfig_path)
         assert response.status_code == 200
         data = response.json()

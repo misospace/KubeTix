@@ -35,7 +35,7 @@ class TestListGrants:
 
     def test_list_grants_empty(self, client, auth_headers):
         """Test listing grants when none exist."""
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         assert response.status_code == 200
         assert response.json() == []
 
@@ -56,7 +56,7 @@ class TestListGrants:
         db_session.commit()
 
         # List grants
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         assert response.status_code == 200
         grants = response.json()
         assert len(grants) == 1
@@ -64,7 +64,7 @@ class TestListGrants:
 
     def test_list_grants_unauthorized(self, client):
         """Test listing grants without authentication."""
-        response = client.get("/grants")
+        response = client.get("api/v1/grants")
         assert response.status_code == 401
 
     def test_list_grants_expired_not_shown(
@@ -86,7 +86,7 @@ class TestListGrants:
         db_session.commit()
 
         # List grants - expired should not appear
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         assert response.status_code == 200
         grants = response.json()
         assert len(grants) == 0
@@ -111,7 +111,7 @@ class TestListGrants:
         db_session.commit()
 
         # List grants - revoked should not appear
-        response = client.get("/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=auth_headers)
         assert response.status_code == 200
         grants = response.json()
         assert len(grants) == 0
@@ -132,7 +132,7 @@ class TestCreateGrants:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "view"},
             headers=auth_headers,
         )
@@ -157,7 +157,7 @@ class TestCreateGrants:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={
                 "cluster_name": "test-cluster",
                 "namespace": "production",
@@ -183,7 +183,7 @@ class TestCreateGrants:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={
                 "cluster_name": "test-cluster",
                 "role": "super-admin",  # Invalid role
@@ -207,7 +207,7 @@ class TestCreateGrants:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={
                 "cluster_name": "test-cluster",
                 "role": "view",
@@ -231,7 +231,7 @@ class TestCreateGrants:
         monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
 
         response = client.post(
-            "/grants",
+            "api/v1/grants",
             json={
                 "cluster_name": "test-cluster",
                 "role": "view",
@@ -246,13 +246,15 @@ class TestCreateGrants:
 
     def test_create_grant_missing_cluster_name(self, client, auth_headers):
         """Test creating a grant without cluster name."""
-        response = client.post("/grants", json={"role": "view"}, headers=auth_headers)
+        response = client.post(
+            "api/v1/grants", json={"role": "view"}, headers=auth_headers
+        )
         assert response.status_code == 422
 
     def test_create_grant_unauthorized(self, client):
         """Test creating a grant without authentication."""
         response = client.post(
-            "/grants", json={"cluster_name": "test-cluster", "role": "view"}
+            "api/v1/grants", json={"cluster_name": "test-cluster", "role": "view"}
         )
         assert response.status_code == 401
 
@@ -278,7 +280,7 @@ class TestRevokeGrants:
         grant_id = grant.id
 
         # Revoke grant
-        response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+        response = client.delete(f"api/v1/grants/{grant_id}", headers=auth_headers)
         assert response.status_code == 204
 
         # Verify grant is revoked — re-query from the same session
@@ -288,7 +290,7 @@ class TestRevokeGrants:
 
     def test_revoke_nonexistent_grant(self, client, auth_headers):
         """Test revoking a nonexistent grant."""
-        response = client.delete("/grants/nonexistent-id", headers=auth_headers)
+        response = client.delete("api/v1/grants/nonexistent-id", headers=auth_headers)
         assert response.status_code == 404
 
     def test_revoke_grant_already_revoked(
@@ -312,7 +314,7 @@ class TestRevokeGrants:
         grant_id = grant.id
 
         # Try to revoke again
-        response = client.delete(f"/grants/{grant_id}", headers=auth_headers)
+        response = client.delete(f"api/v1/grants/{grant_id}", headers=auth_headers)
         # Should still return 204 (idempotent)
         assert response.status_code == 204
 
@@ -360,7 +362,9 @@ class TestDownloadGrants:
         grant_id = grant.id
 
         # Download grant
-        response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+        )
 
         os.unlink(kubeconfig_path)
 
@@ -398,7 +402,9 @@ class TestDownloadGrants:
         grant_id = grant.id
 
         # Try to download
-        response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+        )
 
         os.unlink(kubeconfig_path)
 
@@ -433,7 +439,9 @@ class TestDownloadGrants:
         grant_id = grant.id
 
         # Try to download
-        response = client.get(f"/grants/{grant_id}/download", headers=auth_headers)
+        response = client.get(
+            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+        )
 
         os.unlink(kubeconfig_path)
 

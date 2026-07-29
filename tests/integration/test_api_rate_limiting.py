@@ -43,7 +43,7 @@ class TestAuthenticationRateLimiting:
 
         for i in range(attempts):
             response = client.post(
-                "/login",
+                "api/v1/login",
                 json={"email": "test@example.com", "password": "wrong-password"},
             )
             results.append(response.status_code)
@@ -65,7 +65,7 @@ class TestAuthenticationRateLimiting:
 
         for i in range(5):
             response = client.post(
-                "/login",
+                "api/v1/login",
                 json={"email": "test@example.com", "password": "testpassword123"},
             )
             results.append(response.status_code)
@@ -85,7 +85,7 @@ class TestAuthenticationRateLimiting:
 
         for i in range(10):
             response = client.post(
-                "/users",
+                "api/v1/users",
                 json={"email": f"test{i}@example.com", "password": "testpassword123"},
             )
             results.append(response.status_code)
@@ -107,7 +107,8 @@ class TestAPIRateLimiting:
         """
         # Login first
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -115,7 +116,7 @@ class TestAPIRateLimiting:
         # Make 15 requests — should be blocked after limit (10/min)
         results = []
         for i in range(15):
-            response = client.get("/grants", headers=headers)
+            response = client.get("api/v1/grants", headers=headers)
             results.append(response.status_code)
 
         # After the rate limit is hit, subsequent requests return 429
@@ -131,7 +132,8 @@ class TestAPIRateLimiting:
         """
         # Login first
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -139,7 +141,7 @@ class TestAPIRateLimiting:
         results = []
         for i in range(15):
             response = client.post(
-                "/grants",
+                "api/v1/grants",
                 json={"cluster_name": f"cluster-{i}", "role": "view"},
                 headers=headers,
             )
@@ -163,7 +165,8 @@ class TestRateLimitHeaders:
         """
         # Login
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
 
         # Verify login works within rate limit
@@ -179,13 +182,14 @@ class TestRateLimitConfiguration:
         """Test that different endpoints are subject to rate limits."""
         # Login
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "testpassword123"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
         )
         token = response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
         # Test different endpoints — all should work within limits
-        endpoints = ["/grants", "/teams", "/audit"]
+        endpoints = ["api/v1/grants", "api/v1/teams", "api/v1/audit"]
 
         for endpoint in endpoints:
             response = client.get(endpoint, headers=headers)
@@ -199,7 +203,8 @@ class TestRateLimitConfiguration:
         """Test that rate limiting is applied per-IP."""
         # Make request from same IP with wrong password
         response = client.post(
-            "/login", json={"email": "test@example.com", "password": "wrongpassword"}
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "wrongpassword"},
         )
 
         assert (
