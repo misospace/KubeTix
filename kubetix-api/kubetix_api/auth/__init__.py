@@ -16,9 +16,13 @@ from kubetix_api.models import User
 # Configuration
 # ---------------------------------------------------------------------------
 
-SECRET_KEY = os.environ.get("KUBETIX_SECRET_KEY") or __import__(
-    "secrets"
-).token_urlsafe(32)
+_secret_key_env = os.environ.get("KUBETIX_SECRET_KEY")
+if not _secret_key_env:
+    raise ValueError(
+        "KUBETIX_SECRET_KEY environment variable is not set. "
+        'Generate one with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+SECRET_KEY = _secret_key_env
 ALGORITHM = "HS256"
 # Short-lived access token. There is no refresh token or revocation
 # mechanism beyond the in-memory blacklist, so the lifetime must remain
