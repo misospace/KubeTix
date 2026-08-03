@@ -28,6 +28,13 @@ os.environ.setdefault(
 # monkeypatch when they need to exercise the "key not set" path.
 os.environ.setdefault("KUBETIX_SECRET_KEY", "test-secret-key-for-testing")
 
+# Issue #276: the API now refuses to start without an explicit DATABASE_URL.
+# Provide a per-process SQLite file so unit tests (and ad-hoc exploration
+# of the package) keep working out of the box. Tests that need to exercise
+# the "DATABASE_URL unset" path should delete this env var via monkeypatch
+# before importing kubetix_api.database.
+os.environ.setdefault("DATABASE_URL", "sqlite:///./kubetix_test.db")
+
 from main import app, Base, get_db, User, get_password_hash
 from _shared_db import engine, TestingSessionLocal, override_get_db
 

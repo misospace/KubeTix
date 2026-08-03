@@ -26,7 +26,28 @@ _SessionLocal: Optional[sessionmaker] = None
 
 
 def _default_database_url() -> str:
-    return os.environ.get("DATABASE_URL") or "sqlite:///./kubetix.db"
+    """Return the configured ``DATABASE_URL`` or raise a clear ``RuntimeError``.
+
+    Issue #276 (``[P2] Default SQLite database is unsuitable for production
+    deployments``) removes the silent SQLite fallback so that misconfigured
+    production deployments fail fast at startup instead of silently persisting
+    data to a non-durable, single-writer SQLite file in the container's working
+    directory.
+
+    Operators must point ``DATABASE_URL`` at a real PostgreSQL instance
+    (matching the bundled ``docker-compose.yml`` / Helm chart subchart) before
+    starting the API. The test suite sets a temporary SQLite URL via
+    ``tests/conftest.py``.
+    """
+
+    url = os.environ.get("DATABASE_URL")
+    if not url or not url.strip():
+        raise RuntimeError(
+            "DATABASE_URL is not set. KubeTix requires an explicit database URL "
+            "(e.g. postgresql+psycopg2://user:pass@host:5432/db). The unsafe "
+            "SQLite fallback has been removed; see issue #276."
+        )
+    return url
 
 
 def get_engine() -> Engine:

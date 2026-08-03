@@ -140,11 +140,17 @@ jobs:
       env:
         IMAGE_TAG: ${{ github.sha }}
       run: |
+        # Issue #276: the chart now defaults to PostgreSQL, but the e2e
+        # cluster does not run a Postgres. Override the defaults to use
+        # SQLite (which works in-process without a separate database
+        # service) so the API can start and serve requests.
         helm upgrade --install kubetix-test ./charts/kubetix \
           --namespace kubetix \
           --set image.repository=ghcr.io/${{ github.repository_owner }}/kubetix-api \
           --set image.tag=$IMAGE_TAG \
           --set image.pullPolicy=IfNotPresent \
+          --set database.postgresql.enabled=false \
+          --set database.sqlite.enabled=true \
           --set env[0].name=KUBECONFIG \
           --set env[0].value=/app/kubeconfig/config \
           --set env[1].name=KUBECONFIG_ENCRYPTION_KEY \

@@ -108,9 +108,9 @@ spec:
               readOnly: true
             {{- end }}
           {{- end }}
-      {{- if or .Values.volumes .Values.database.sqlite.enabled .Values.extraVolumes (and .Values.externalSecrets.enabled .Values.externalSecrets.vault.enabled) }}
+      {{- if or (and .Values.volumes (gt (len .Values.volumes) 0)) .Values.database.sqlite.enabled (and .Values.extraVolumes (gt (len .Values.extraVolumes) 0)) (and .Values.externalSecrets.enabled .Values.externalSecrets.vault.enabled) }}
       volumes:
-        {{- if and .Values.volumes .Values.database.sqlite.enabled }}
+        {{- if and (and .Values.volumes (gt (len .Values.volumes) 0)) .Values.database.sqlite.enabled }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "kubetix.fullname" . }}-data
@@ -119,7 +119,7 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "kubetix.fullname" . }}-data
-        {{- else }}
+        {{- else if and .Values.volumes (gt (len .Values.volumes) 0) }}
         {{- toYaml .Values.volumes | nindent 8 }}
         {{- end }}
         {{- if .Values.extraVolumes }}
