@@ -78,27 +78,35 @@ affinity: {}
 secretKey: ""
 
 # Database configuration
+# The KubeTix API requires DATABASE_URL to be set (issue #276). The chart
+# defaults below produce a PostgreSQL connection string; SQLite is kept
+# available for local development only.
 database:
-  # SQLite (default - simple, no external dependencies)
-  # WARNING: SQLite is NOT suitable for multi-replica HA deployments.
-  # Only use with replicaCount: 1 and local/persistent storage.
-  sqlite:
-    enabled: true
-    persistence:
-      enabled: true
-      size: 1Gi
-  
-  # PostgreSQL (production recommended)
-  # Requires external PostgreSQL server or Helm chart dependency.
+  # PostgreSQL (DEFAULT - production ready)
+  # Either install the bundled postgresql subchart (default) or point
+  # `host` at an existing PostgreSQL instance. The API reads
+  # DATABASE_URL from a Kubernetes Secret whose value is templated here.
   postgresql:
-    enabled: false
-    host: ""
+    enabled: true
+    # Used only when existingSecret is empty. The bundled subchart
+    # overwrites these on install with a random password.
+    host: "kubetix-postgresql"
     port: 5432
     database: kubetix
     username: kubetix
-    password: ""
+    # WARNING: this default is for the bundled subchart only. Set
+    # existingSecret for production deployments.
+    password: "kubetix"
     existingSecret: ""
     existingSecretPasswordKey: ""
+
+  # SQLite (development only - single-replica, in-process database)
+  # WARNING: SQLite is NOT suitable for production deployments.
+  sqlite:
+    enabled: false
+    persistence:
+      enabled: false
+      size: 1Gi
 
 # OIDC/Authentik configuration
 oidc:
