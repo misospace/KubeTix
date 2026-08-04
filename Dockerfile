@@ -20,7 +20,3 @@ USER kubeshare
 ENTRYPOINT ["python3", "kc-share.py"]
 
 # Expose nothing (CLI tool, no network service)
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 kc-share.py --help || exit 1
