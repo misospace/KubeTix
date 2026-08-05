@@ -11,7 +11,7 @@ Share secure, time-limited Kubernetes access with your team. No more permanent a
 - **Audit Logging** - Track who accessed what and when
 - **Instant Revocation** - Cut off access immediately, anytime
 - **Simple CLI** - Easy to use command-line interface
-- **Namespace & Role Control** - Fine-grained access control
+- **Admin-Only Grants** - Only administrators can create grants, preventing unprivileged users from obtaining cluster credentials
 
 ## 💡 Use Cases
 

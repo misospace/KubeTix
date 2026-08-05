@@ -29,7 +29,7 @@ from main import app, Base, get_db, User, Grant, get_password_hash
 class TestConcurrentGrantCreation:
     """Tests for concurrent grant creation."""
 
-    def test_concurrent_grant_creation(self, client, auth_headers, monkeypatch):
+    def test_concurrent_grant_creation(self, client, admin_headers, monkeypatch):
         """Test creating multiple grants concurrently."""
         # Mock kubeconfig
         with __import__("tempfile").NamedTemporaryFile(
@@ -48,7 +48,7 @@ class TestConcurrentGrantCreation:
                 response = client.post(
                     "api/v1/grants",
                     json={"cluster_name": f"cluster-{i}", "role": "view"},
-                    headers=auth_headers,
+                    headers=admin_headers,
                 )
                 return response.status_code, response.json()
             except Exception as e:
@@ -69,7 +69,7 @@ class TestConcurrentGrantCreation:
         assert all(s == 201 for s in results)
 
         # List grants - should have all 10
-        response = client.get("api/v1/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=admin_headers)
         grants = response.json()
         assert len(grants) == 10
 
@@ -162,7 +162,7 @@ class TestConcurrentRevocation:
 class TestRaceConditionPrevention:
     """Tests to ensure race conditions are handled."""
 
-    def test_grant_idempotency(self, client, auth_headers, monkeypatch):
+    def test_grant_idempotency(self, client, admin_headers, monkeypatch):
         """Test that concurrent identical requests are handled idempotently."""
         with __import__("tempfile").NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -179,7 +179,7 @@ class TestRaceConditionPrevention:
             response = client.post(
                 "api/v1/grants",
                 json={"cluster_name": "same-cluster", "role": "view"},
-                headers=auth_headers,
+                headers=admin_headers,
             )
             return response.status_code
 
