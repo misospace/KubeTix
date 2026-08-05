@@ -74,6 +74,12 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      # Seeds admin@kubetix.local (is_admin=True) at API startup, so the suite has
+      # an administrator to create grants with. Grant creation is admin-only
+      # (#309); without this the API has no admin at all and every create 403s.
+      # Throwaway value for an ephemeral kind cluster, like the encryption key below.
+      E2E_ADMIN_PASSWORD: e2e-admin-pw-not-a-secret
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,6 +161,8 @@ jobs:
           --set env[0].value=/app/kubeconfig/config \
           --set env[1].name=KUBECONFIG_ENCRYPTION_KEY \
           --set env[1].value=dJWHka3L7pzAe0o2p_ss3FkybzxfEENl8bU-vpdgXvc= \
+          --set env[2].name=INITIAL_ADMIN_PASSWORD \
+          --set env[2].value=$E2E_ADMIN_PASSWORD \
           --set extraVolumes[0].name=kubeconfig \
           --set extraVolumes[0].secret.secretName=kubetix-kubeconfig \
           --set extraVolumeMounts[0].name=kubeconfig \

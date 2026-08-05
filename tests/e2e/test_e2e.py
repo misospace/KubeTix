@@ -16,6 +16,17 @@ from typing import Optional
 # Configuration
 API_URL = "http://localhost:8000"
 
+# Grant creation is admin-only (#309). The API seeds this account at startup when
+# INITIAL_ADMIN_PASSWORD is set, which the e2e workflow passes through Helm; it is
+# the only way to obtain an administrator over HTTP, since registration always
+# creates non-admin users.
+ADMIN_EMAIL = "admin@kubetix.local"
+ADMIN_PASSWORD = os.environ.get("E2E_ADMIN_PASSWORD", "e2e-admin-pw-not-a-secret")
+ADMIN_CREDENTIALS = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+
+# A regular registered user, used to assert the admin restriction actually bites.
+USER_CREDENTIALS = {"email": "test@example.com", "password": "testpassword123"}
+
 
 def wait_for_service_ready(url: str, timeout: int = 120):
     """Wait for API service to be ready."""
@@ -102,11 +113,60 @@ class TestKubeTixE2E:
         assert "user" in data
         assert data["user"]["email"] == "login-test@example.com"
 
+    def test_03b_non_admin_cannot_create_grant(self, wait_for_api, kubeconfig):
+        """A registered non-admin user must be refused grant creation (#309).
+
+        This is the restriction under test, exercised against a deployed API
+        rather than a test client that can set is_admin directly on the model.
+        """
+        login_response = requests.post(
+            f"{wait_for_api}/api/v1/login",
+            json=USER_CREDENTIALS,
+        )
+        assert login_response.status_code == 200
+        token = login_response.json()["access_token"]
+
+        response = requests.post(
+            f"{wait_for_api}/api/v1/grants",
+            json={
+                "cluster_name": "non-admin-cluster",
+                "namespace": "default",
+                "role": "view",
+                "expiry_hours": 4,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+        assert "administrator" in response.json()["detail"].lower()
+
+    def test_03c_admin_account_is_seeded(self, wait_for_api):
+        """The admin the grant tests depend on must exist and report is_admin.
+
+        Without INITIAL_ADMIN_PASSWORD reaching the pod, the API starts with no
+        administrator and every grant test fails with a 403 that looks like a
+        broken restriction rather than missing setup.
+        """
+        login_response = requests.post(
+            f"{wait_for_api}/api/v1/login",
+            json=ADMIN_CREDENTIALS,
+        )
+        assert login_response.status_code == 200, (
+            "admin login failed — INITIAL_ADMIN_PASSWORD likely did not reach the API pod"
+        )
+        token = login_response.json()["access_token"]
+
+        me = requests.get(
+            f"{wait_for_api}/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me.status_code == 200
+        assert me.json()["is_admin"] is True
+
     def test_04_create_grant(self, wait_for_api, kubeconfig):
         """Test creating a grant."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -133,7 +193,7 @@ class TestKubeTixE2E:
         """Test listing grants."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -149,7 +209,7 @@ class TestKubeTixE2E:
         """Test downloading a grant."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -181,7 +241,7 @@ class TestKubeTixE2E:
         """Test revoking a grant."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -214,7 +274,7 @@ class TestKubeTixE2E:
         """Test audit logging."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -242,7 +302,7 @@ class TestKubeTixE2E:
         """Test grant expiry validation."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -264,7 +324,7 @@ class TestKubeTixE2E:
         """Test invalid role validation."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
@@ -279,7 +339,7 @@ class TestKubeTixE2E:
         """Test behavior when kubeconfig is missing."""
         login_response = requests.post(
             f"{wait_for_api}/api/v1/login",
-            json={"email": "test@example.com", "password": "testpassword123"},
+            json=ADMIN_CREDENTIALS,
         )
         token = login_response.json()["access_token"]
 
