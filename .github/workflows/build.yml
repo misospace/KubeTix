@@ -144,6 +144,7 @@ jobs:
         # cluster does not run a Postgres. Override the defaults to use
         # SQLite (which works in-process without a separate database
         # service) so the API can start and serve requests.
+        helm dependency build ./charts/kubetix
         helm upgrade --install kubetix-test ./charts/kubetix \
           --namespace kubetix \
           --set image.repository=ghcr.io/${{ github.repository_owner }}/kubetix-api \
