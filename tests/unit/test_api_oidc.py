@@ -20,7 +20,9 @@ def mock_oidc_env(monkeypatch):
     monkeypatch.setenv("OIDC_ISSUER", "https://authentik.example.com")
     monkeypatch.setenv("OIDC_CLIENT_ID", "kubetix-test")
     monkeypatch.setenv("OIDC_CLIENT_SECRET", "test-secret")
-    monkeypatch.setenv("OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback")
+    monkeypatch.setenv(
+        "OIDC_REDIRECT_URI", "http://localhost:8000/api/v1/auth/oidc/callback"
+    )
 
 
 @pytest.fixture(scope="function")
@@ -67,7 +69,7 @@ class TestOIDCEndpoints:
 
     def test_oidc_callback_without_code(self, client):
         """Test OIDC callback without code fails."""
-        response = client.post("api/v1/auth/oidc/callback")
+        response = client.get("api/v1/auth/oidc/callback")
 
         # Should fail validation (missing 'code' field)
         assert response.status_code == 422
@@ -291,7 +293,7 @@ class TestSSORoundTrip:
             "httpx.get", return_value=mock_userinfo_resp
         ):
             # 4. Call the callback endpoint with the same state (auth_code_id)
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-auth-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
@@ -336,7 +338,7 @@ class TestSSORoundTrip:
                 "sub": "oidc-67890",
             },
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/oidc/callback?code=fake-auth-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
@@ -351,7 +353,7 @@ class TestSSORoundTrip:
 
     def test_sso_callback_rejects_wrong_state(self, client, mock_google_sso_env):
         """Test that callback rejects a state value that doesn't match any record."""
-        response = client.post(
+        response = client.get(
             "api/v1/auth/sso/callback?provider=google&code=fake-auth-code"
             "&state=nonexistent-state&code_verifier=some-verifier"
         )
@@ -390,7 +392,7 @@ class TestSSORoundTrip:
         with patch("httpx.post", return_value=mock_token_resp), patch(
             "httpx.get", return_value=mock_userinfo_resp
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
@@ -400,7 +402,7 @@ class TestSSORoundTrip:
         with patch("httpx.post", return_value=mock_token_resp), patch(
             "httpx.get", return_value=mock_userinfo_resp
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={auth_code_id}&code_verifier={code_verifier}"
             )
@@ -439,7 +441,7 @@ class TestSSORoundTrip:
             json={"access_token": "mock-token", "token_type": "Bearer"},
         )
         with patch("httpx.post", return_value=mock_token_resp):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state=attacker-controlled-state&code_verifier={code_verifier}"
             )
@@ -453,7 +455,7 @@ class TestSSORoundTrip:
         with patch("httpx.post", return_value=mock_token_resp), patch(
             "httpx.get", return_value=mock_userinfo_resp
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
@@ -483,7 +485,7 @@ class TestSSOErrorHandling:
             json={"error": "access_denied", "error_description": "User denied access"},
         )
         with patch("httpx.post", return_value=mock_token_resp):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
@@ -535,7 +537,7 @@ class TestSSOErrorHandling:
         ), patch(
             "httpx.get", side_effect=lambda *a, **kw: mock_request("GET", *a, **kw)
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/sso/callback?provider=google&code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
@@ -573,7 +575,7 @@ class TestSSOErrorHandling:
             return resp
 
         with patch("httpx.post", side_effect=mock_post):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/oidc/callback?code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )
@@ -617,7 +619,7 @@ class TestSSOErrorHandling:
         with patch("httpx.post", side_effect=mock_post), patch(
             "httpx.get", side_effect=mock_get
         ):
-            response = client.post(
+            response = client.get(
                 "api/v1/auth/oidc/callback?code=fake-code"
                 f"&state={csrf_state}&code_verifier={code_verifier}"
             )

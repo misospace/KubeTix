@@ -469,7 +469,7 @@ from kubetix_api.oidc import (  # noqa: E402
 )
 
 
-@v1_router.post("/auth/sso/callback")
+@v1_router.get("/auth/sso/callback")
 @limiter.limit("5 per minute")
 async def sso_callback(
     request: Request,
@@ -549,7 +549,7 @@ async def sso_callback(
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
-        "http://localhost:8000/auth/sso/callback",
+        "http://localhost:8000/api/v1/auth/sso/callback",
     )
 
     if provider == "github":
@@ -703,7 +703,7 @@ async def sso_login(
 
     redirect_uri = os.environ.get(
         "SSO_REDIRECT_URI",
-        "http://localhost:8000/auth/sso/callback",
+        "http://localhost:8000/api/v1/auth/sso/callback",
     )
 
     params = {
@@ -727,7 +727,7 @@ async def sso_login(
     }
 
 
-@v1_router.post("/auth/oidc/callback")
+@v1_router.get("/auth/oidc/callback")
 @limiter.limit("5 per minute")
 async def oidc_callback(
     request: Request,
@@ -740,7 +740,7 @@ async def oidc_callback(
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
     oidc_client_secret = os.environ.get("OIDC_CLIENT_SECRET", "")
     oidc_redirect_uri = os.environ.get(
-        "OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback"
+        "OIDC_REDIRECT_URI", "http://localhost:8000/api/v1/auth/oidc/callback"
     )
 
     if not all([oidc_issuer, oidc_client_id, oidc_client_secret]):
@@ -822,7 +822,7 @@ async def oidc_login(
     oidc_issuer = os.environ.get("OIDC_ISSUER", "")
     oidc_client_id = os.environ.get("OIDC_CLIENT_ID", "")
     oidc_redirect_uri = os.environ.get(
-        "OIDC_REDIRECT_URI", "http://localhost:8000/auth/oidc/callback"
+        "OIDC_REDIRECT_URI", "http://localhost:8000/api/v1/auth/oidc/callback"
     )
 
     if not oidc_issuer or not oidc_client_id:

@@ -410,8 +410,8 @@ KubeTix supports authentication via any OIDC provider, including **Authentik**, 
    - **Authorization flow**: Default
    - **Signing Key**: Select your certificate
    - **Redirect URIs**:
-     - `http://localhost:8000/auth/oidc/callback`
-     - `https://kubetix.yourdomain.com/auth/oidc/callback`
+     - `http://localhost:8000/api/v1/auth/oidc/callback`
+     - `https://kubetix.yourdomain.com/api/v1/auth/oidc/callback`
 
 #### Create Application in Authentik
 
@@ -447,7 +447,7 @@ env:
       name: kubetix-oidc
       key: oidc-client-secret
 - name: OIDC_REDIRECT_URI
-  value: "https://kubetix.yourdomain.com/auth/oidc/callback"
+  value: "https://kubetix.yourdomain.com/api/v1/auth/oidc/callback"
 ```
 
 ### 4. Update Web Deployment
@@ -527,7 +527,7 @@ services:
       - OIDC_ISSUER=http://localhost:9000
       - OIDC_CLIENT_ID=kubetix
       - OIDC_CLIENT_SECRET=changeme
-      - OIDC_REDIRECT_URI=http://localhost:8000/auth/oidc/callback
+      - OIDC_REDIRECT_URI=http://localhost:8000/api/v1/auth/oidc/callback
     depends_on:
       - kubetix-db
 
@@ -551,7 +551,7 @@ services:
 | `OIDC_ISSUER` | OIDC provider URL | `https://authentik.yourdomain.com` |
 | `OIDC_CLIENT_ID` | OAuth client ID | `kubetix` |
 | `OIDC_CLIENT_SECRET` | OAuth client secret | `secret-from-authentik` |
-| `OIDC_REDIRECT_URI` | Callback URL | `https://kubetix.yourdomain.com/auth/oidc/callback` |
+| `OIDC_REDIRECT_URI` | Callback URL | `https://kubetix.yourdomain.com/api/v1/auth/oidc/callback` |
 | `OIDC_SCOPES` | OAuth scopes | `openid profile email` |
 
 ### 8. Supported Providers
