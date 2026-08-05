@@ -108,6 +108,27 @@ database:
       enabled: false
       size: 1Gi
 
+# Configuration for the bundled Bitnami PostgreSQL subchart. When
+# ``database.postgresql.enabled`` is ``true`` (the default) the subchart
+# is rendered as part of ``helm install``; otherwise the kubetix chart
+# assumes the user has pointed ``database.postgresql.host`` at an
+# external PostgreSQL instance. ``auth.*`` mirrors
+# ``database.postgresql`` so the rendered ``DATABASE_URL`` matches the
+# credentials the subchart actually creates.
+postgresql:
+  enabled: true
+  auth:
+    username: kubetix
+    password: kubetix
+    database: kubetix
+  primary:
+    persistence:
+      enabled: false
+  image:
+    registry: docker.io
+    repository: bitnami/postgresql
+    tag: 17.4.0-debian-12-r0
+
 # OIDC/Authentik configuration
 oidc:
   enabled: false

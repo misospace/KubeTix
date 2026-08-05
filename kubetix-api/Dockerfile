@@ -2,6 +2,17 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
+# Install libpq headers so ``psycopg2-binary`` can be built from source
+# when no pre-built wheel is available for the active CPython release
+# (see issue #310: psycopg2-binary 2.9.10 ships only a sdist for the
+# newest CPython minor). The bundled Bitnami postgresql subchart in the
+# Helm chart relies on this driver being present at runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

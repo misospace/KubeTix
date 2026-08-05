@@ -50,14 +50,27 @@ def _default_database_url() -> str:
     return url
 
 
+def _build_connect_args(url: str) -> dict:
+    """Return dialect-safe ``connect_args`` for ``url``.
+
+    ``check_same_thread`` is a ``sqlite3`` driver keyword; passing it to
+    psycopg2/psycopg raises ``TypeError: 'check_same_thread' is an invalid
+    keyword argument for this function``. We only attach it for sqlite URLs,
+    which is the only dialect the KubeTix API currently defaults to in
+    tests / development. Production deployments point ``DATABASE_URL`` at
+    PostgreSQL (see issue #310) and must not receive sqlite-only kwargs.
+    """
+    if url.startswith("sqlite"):
+        return {"check_same_thread": False}
+    return {}
+
+
 def get_engine() -> Engine:
     """Return the process-wide SQLAlchemy engine, building it on first use."""
     global _engine
     if _engine is None:
-        _engine = create_engine(
-            _default_database_url(),
-            connect_args={"check_same_thread": False},
-        )
+        url = _default_database_url()
+        _engine = create_engine(url, connect_args=_build_connect_args(url))
     return _engine
 
 

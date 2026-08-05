@@ -4,6 +4,19 @@ description: A Helm chart for deploying KubeTix - Temporary Kubernetes Access Ma
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+dependencies:
+  # Bundled PostgreSQL subchart (default). The Helm ``values.yaml`` sets
+  # ``database.postgresql.enabled: true``, so ``templates/secrets.yaml``
+  # builds ``DATABASE_URL`` from these values out of the box. Disable via
+  # ``--set database.postgresql.enabled=false`` to bring your own
+  # PostgreSQL instance.
+  - name: postgresql
+    version: "16.7.4"
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: database.postgresql.enabled
+    tags:
+      - database
+      - postgresql
 keywords:
   - kubernetes
   - kubeconfig

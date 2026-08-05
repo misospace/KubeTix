@@ -8,3 +8,15 @@ pydantic==2.13.4
 cryptography==50.0.0
 httpx==0.28.1
 slowapi==0.1.10
+# PostgreSQL drivers (issue #310). ``psycopg2-binary`` is the default
+# SQLAlchemy driver for ``postgresql://`` / ``postgresql+psycopg2://``
+# URLs and is what ``DATABASE_URL`` in the bundled Helm chart resolves
+# to. ``psycopg[binary]`` (psycopg 3) is installed alongside it for
+# ``postgresql+psycopg://`` URLs and because it ships manylinux_2_28
+# wheels for newer CPython releases (3.13+), avoiding source builds
+# on slim container images where libpq headers are absent. The source
+# build fallback for ``psycopg2-binary`` is enabled in the Dockerfile
+# (libpq-dev) for the (transient) window before upstream publishes a
+# wheel for the newest CPython.
+psycopg2-binary>=2.9.10
+psycopg[binary]>=3.2.0,<4.0.0
