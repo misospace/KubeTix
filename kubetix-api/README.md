@@ -62,7 +62,7 @@ Once running, visit:
 - `POST /users` - Register new user
 - `POST /login` - Login and get JWT token
 - `GET /users/me` - Get current user info
-- `POST /auth/sso/callback` - SSO callback
+- `GET /api/v1/auth/sso/callback` - SSO callback
 - `GET /auth/sso/{provider}/login` - Initiate SSO login
 
 ### Grants

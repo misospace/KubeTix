@@ -133,7 +133,7 @@ helm install kubetix kubetix/kubetix \
   --set oidc.issuer=https://authentik.example.com \
   --set oidc.clientId=kubetix \
   --set oidc.clientSecret=<your-secret> \
-  --set oidc.redirectUri=https://kubetix.example.com/auth/oidc/callback
+  --set oidc.redirectUri=https://kubetix.example.com/api/v1/auth/oidc/callback
 ```
 
 ### Autoscaling

@@ -72,7 +72,7 @@ def test_sso_login_uses_fixed_default_redirect_uri(app_module, monkeypatch):
     monkeypatch.setenv("SSO_GOOGLE_CLIENT_ID", "test-client-id")
 
     client = TestClient(app_module.app)
-    response = client.get("/auth/sso/google/login")
+    response = client.get("/api/v1/auth/sso/google/login")
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -98,7 +98,7 @@ def test_sso_login_uses_fixed_default_redirect_uri(app_module, monkeypatch):
             "Default SSO_REDIRECT_URI must not include a dynamic ?provider= "
             f"query parameter; got {ru!r}"
         )
-        # And it should be a fixed callback path.
+        # And it should be the versioned callback path.
         assert ru.endswith(
-            "/auth/sso/callback"
-        ), f"Expected redirect_uri to end with /auth/sso/callback, got {ru!r}"
+            "/api/v1/auth/sso/callback"
+        ), f"Expected redirect_uri to end with /api/v1/auth/sso/callback, got {ru!r}"
