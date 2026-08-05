@@ -120,6 +120,13 @@ jobs:
     - name: Install Helm
       uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
+    - name: Build Helm chart dependencies
+      run: |
+        # Issue #310: the bundled Bitnami postgresql subchart must be
+        # vendored before ``helm lint``/``helm template`` so the
+        # dependency declared in ``charts/kubetix/Chart.yaml`` resolves.
+        helm dependency build ./charts/kubetix
+
     - name: Lint Helm chart
       run: |
         helm lint ./charts/kubetix
