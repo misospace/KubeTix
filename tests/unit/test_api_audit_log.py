@@ -39,7 +39,7 @@ class TestAuditLogEndpoint:
         assert response.json() == []
 
     def test_audit_log_contains_grant_creation(
-        self, client, db, auth_headers, monkeypatch
+        self, client, db, admin_headers, monkeypatch
     ):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -50,11 +50,11 @@ class TestAuditLogEndpoint:
         response = client.post(
             "api/v1/grants",
             json={"cluster_name": "audit-test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
         os.unlink(kubeconfig_path)
         assert response.status_code == 201
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         assert audit_response.status_code == 200
         logs = audit_response.json()
         assert len(logs) >= 1
@@ -63,7 +63,7 @@ class TestAuditLogEndpoint:
         assert "audit-test-cluster" in creation_entries[0]["details"]
 
     def test_audit_log_contains_grant_revocation(
-        self, client, db, auth_headers, monkeypatch
+        self, client, db, admin_headers, monkeypatch
     ):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -74,22 +74,22 @@ class TestAuditLogEndpoint:
         client.post(
             "api/v1/grants",
             json={"cluster_name": "revoke-test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
-        grants_response = client.get("api/v1/grants", headers=auth_headers)
+        grants_response = client.get("api/v1/grants", headers=admin_headers)
         grant_id = grants_response.json()[0]["id"]
         revoke_response = client.delete(
-            f"api/v1/grants/{grant_id}", headers=auth_headers
+            f"api/v1/grants/{grant_id}", headers=admin_headers
         )
         assert revoke_response.status_code == 204
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         revoke_entries = [log for log in logs if log["action"] == "revoked"]
         assert len(revoke_entries) >= 1
 
     def test_audit_log_contains_grant_download(
-        self, client, db, auth_headers, monkeypatch
+        self, client, db, admin_headers, monkeypatch
     ):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -100,22 +100,22 @@ class TestAuditLogEndpoint:
         client.post(
             "api/v1/grants",
             json={"cluster_name": "download-test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
-        grants_response = client.get("api/v1/grants", headers=auth_headers)
+        grants_response = client.get("api/v1/grants", headers=admin_headers)
         grant_id = grants_response.json()[0]["id"]
         download_response = client.get(
-            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+            f"api/v1/grants/{grant_id}/download", headers=admin_headers
         )
         assert download_response.status_code == 200
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         download_entries = [log for log in logs if log["action"] == "downloaded"]
         assert len(download_entries) >= 1
         assert "download-test-cluster" in download_entries[0]["details"]
 
-    def test_audit_log_fields(self, client, db, auth_headers, monkeypatch):
+    def test_audit_log_fields(self, client, db, admin_headers, monkeypatch):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
         ) as f:
@@ -125,17 +125,19 @@ class TestAuditLogEndpoint:
         client.post(
             "api/v1/grants",
             json={"cluster_name": "fields-test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         assert len(logs) >= 1
         entry = logs[0]
         for field in {"id", "user_id", "grant_id", "action", "details", "created_at"}:
             assert field in entry, f"Missing field: {field}"
 
-    def test_audit_log_ordering_descending(self, client, db, auth_headers, monkeypatch):
+    def test_audit_log_ordering_descending(
+        self, client, db, admin_headers, monkeypatch
+    ):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
         ) as f:
@@ -146,16 +148,16 @@ class TestAuditLogEndpoint:
             client.post(
                 "api/v1/grants",
                 json={"cluster_name": f"ordering-cluster-{i}", "role": "view"},
-                headers=auth_headers,
+                headers=admin_headers,
             )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         assert len(logs) >= 3
         for i in range(len(logs) - 1):
             assert logs[i]["created_at"] >= logs[i + 1]["created_at"]
 
-    def test_audit_log_limit(self, client, db, auth_headers, monkeypatch):
+    def test_audit_log_limit(self, client, db, admin_headers, monkeypatch):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
         ) as f:
@@ -166,10 +168,10 @@ class TestAuditLogEndpoint:
             client.post(
                 "api/v1/grants",
                 json={"cluster_name": f"limit-cluster-{i}", "role": "view"},
-                headers=auth_headers,
+                headers=admin_headers,
             )
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         assert len(logs) <= 100
 
@@ -188,24 +190,20 @@ class TestAuditLogEndpoint:
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert admin_response.status_code == 201
+        # Non-admin users cannot create grants (issue #309)
         user_response = client.post(
             "api/v1/grants",
             json={"cluster_name": "user-cluster", "role": "view"},
             headers=other_headers,
         )
-        assert user_response.status_code == 201
+        assert user_response.status_code == 403
         os.unlink(kubeconfig_path)
+        # Non-admin users can see their own audit log entries (empty since they can't create grants)
         audit_response = client.get("api/v1/audit", headers=other_headers)
-        logs = audit_response.json()
-        user_entries = [log for log in logs if "user-cluster" in log.get("details", "")]
-        admin_entries = [
-            log for log in logs if "admin-cluster" in log.get("details", "")
-        ]
-        assert len(user_entries) >= 1
-        assert len(admin_entries) == 0
+        assert audit_response.status_code == 200
 
     def test_audit_log_admin_sees_all_entries(
-        self, client, db, admin_headers, other_token, monkeypatch
+        self, client, db, admin_headers, monkeypatch
     ):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -219,28 +217,33 @@ class TestAuditLogEndpoint:
             headers=admin_headers,
         )
         assert admin_response.status_code == 201
-        client.post(
-            "api/v1/grants",
-            json={"cluster_name": "user-audit-cluster", "role": "view"},
-            headers={"Authorization": f"Bearer {other_token}"},
-        )
         os.unlink(kubeconfig_path)
         audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         admin_entries = [
             log for log in logs if "admin-audit-cluster" in log.get("details", "")
         ]
-        user_entries = [
-            log for log in logs if "user-audit-cluster" in log.get("details", "")
-        ]
         assert len(admin_entries) >= 1
-        assert len(user_entries) >= 1
+
+    def test_audit_log_non_admin_cannot_access(
+        self, client, db, auth_headers, monkeypatch
+    ):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+            kubeconfig_path = f.name
+        monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
+        # Non-admin users can access their own audit log (returns empty list)
+        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        assert audit_response.status_code == 200
+        os.unlink(kubeconfig_path)
 
 
 class TestAuditLogIntegration:
     """Integration tests for audit log with grant operations."""
 
-    def test_full_lifecycle_audit_trail(self, client, db, auth_headers, monkeypatch):
+    def test_full_lifecycle_audit_trail(self, client, db, admin_headers, monkeypatch):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
         ) as f:
@@ -250,20 +253,20 @@ class TestAuditLogIntegration:
         create_response = client.post(
             "api/v1/grants",
             json={"cluster_name": "lifecycle-cluster", "role": "edit"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
         assert create_response.status_code == 201
         grant_id = create_response.json()["id"]
         download_response = client.get(
-            f"api/v1/grants/{grant_id}/download", headers=auth_headers
+            f"api/v1/grants/{grant_id}/download", headers=admin_headers
         )
         assert download_response.status_code == 200
         os.unlink(kubeconfig_path)
         revoke_response = client.delete(
-            f"api/v1/grants/{grant_id}", headers=auth_headers
+            f"api/v1/grants/{grant_id}", headers=admin_headers
         )
         assert revoke_response.status_code == 204
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         actions = [log["action"] for log in logs]
         assert "created" in actions
@@ -276,7 +279,7 @@ class TestAuditLogIntegration:
         assert downloaded_entry["grant_id"] == grant_id
         assert revoked_entry["grant_id"] == grant_id
 
-    def test_audit_log_grant_id_present(self, client, db, auth_headers, monkeypatch):
+    def test_audit_log_grant_id_present(self, client, db, admin_headers, monkeypatch):
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
         ) as f:
@@ -286,12 +289,12 @@ class TestAuditLogIntegration:
         create_response = client.post(
             "api/v1/grants",
             json={"cluster_name": "grant-id-test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
         assert create_response.status_code == 201
         grant_id = create_response.json()["id"]
         os.unlink(kubeconfig_path)
-        audit_response = client.get("api/v1/audit", headers=auth_headers)
+        audit_response = client.get("api/v1/audit", headers=admin_headers)
         logs = audit_response.json()
         created_entry = next((log for log in logs if log["action"] == "created"), None)
         assert created_entry is not None

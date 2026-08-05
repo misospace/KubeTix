@@ -120,7 +120,7 @@ class TestListGrants:
 class TestCreateGrants:
     """Tests for creating grants."""
 
-    def test_create_grant_minimal(self, client, auth_headers, monkeypatch):
+    def test_create_grant_minimal(self, client, admin_headers, monkeypatch):
         """Test creating a grant with minimal parameters."""
         # Mock kubeconfig file
         with tempfile.NamedTemporaryFile(
@@ -134,7 +134,7 @@ class TestCreateGrants:
         response = client.post(
             "api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
@@ -146,7 +146,7 @@ class TestCreateGrants:
         assert "id" in data
         assert "expires_at" in data
 
-    def test_create_grant_with_namespace(self, client, auth_headers, monkeypatch):
+    def test_create_grant_with_namespace(self, client, admin_headers, monkeypatch):
         """Test creating a grant with namespace."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -163,7 +163,7 @@ class TestCreateGrants:
                 "namespace": "production",
                 "role": "edit",
             },
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
@@ -172,7 +172,7 @@ class TestCreateGrants:
         data = response.json()
         assert data["namespace"] == "production"
 
-    def test_create_grant_invalid_role(self, client, auth_headers, monkeypatch):
+    def test_create_grant_invalid_role(self, client, admin_headers, monkeypatch):
         """Test creating a grant with invalid role."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -188,7 +188,7 @@ class TestCreateGrants:
                 "cluster_name": "test-cluster",
                 "role": "super-admin",  # Invalid role
             },
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
@@ -196,7 +196,7 @@ class TestCreateGrants:
         assert response.status_code == 422
         assert any("role" in str(err).lower() for err in response.json()["detail"])
 
-    def test_create_grant_expiry_too_short(self, client, auth_headers, monkeypatch):
+    def test_create_grant_expiry_too_short(self, client, admin_headers, monkeypatch):
         """Test creating a grant with expiry too short."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -213,14 +213,14 @@ class TestCreateGrants:
                 "role": "view",
                 "expiry_hours": 0,  # Too short
             },
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
 
         assert response.status_code == 422
 
-    def test_create_grant_expiry_too_long(self, client, auth_headers, monkeypatch):
+    def test_create_grant_expiry_too_long(self, client, admin_headers, monkeypatch):
         """Test creating a grant with expiry too long."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -237,17 +237,17 @@ class TestCreateGrants:
                 "role": "view",
                 "expiry_hours": 1000,  # Too long
             },
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
 
         assert response.status_code == 422
 
-    def test_create_grant_missing_cluster_name(self, client, auth_headers):
+    def test_create_grant_missing_cluster_name(self, client, admin_headers):
         """Test creating a grant without cluster name."""
         response = client.post(
-            "api/v1/grants", json={"role": "view"}, headers=auth_headers
+            "api/v1/grants", json={"role": "view"}, headers=admin_headers
         )
         assert response.status_code == 422
 
@@ -257,6 +257,51 @@ class TestCreateGrants:
             "api/v1/grants", json={"cluster_name": "test-cluster", "role": "view"}
         )
         assert response.status_code == 401
+
+    def test_create_grant_non_admin_forbidden(self, client, auth_headers, monkeypatch):
+        """Test that non-admin users cannot create grants (issue #309)."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+            kubeconfig_path = f.name
+
+        monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
+
+        # auth_headers uses a non-admin user (from conftest auth_token fixture)
+        response = client.post(
+            "api/v1/grants",
+            json={"cluster_name": "test-cluster", "role": "view"},
+            headers=auth_headers,
+        )
+
+        os.unlink(kubeconfig_path)
+
+        assert response.status_code == 403
+        assert "administrator" in response.json()["detail"].lower()
+
+    def test_create_grant_admin_success(self, client, admin_headers, monkeypatch):
+        """Test that admin users can create grants."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".kubeconfig", delete=False
+        ) as f:
+            f.write("apiVersion: v1\nkind: Config\n")
+            kubeconfig_path = f.name
+
+        monkeypatch.setenv("KUBECONFIG", kubeconfig_path)
+
+        response = client.post(
+            "api/v1/grants",
+            json={"cluster_name": "test-cluster", "role": "view"},
+            headers=admin_headers,
+        )
+
+        os.unlink(kubeconfig_path)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["cluster_name"] == "test-cluster"
+        assert data["role"] == "view"
 
 
 class TestRevokeGrants:

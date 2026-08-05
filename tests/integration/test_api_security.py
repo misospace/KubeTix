@@ -77,7 +77,7 @@ class TestSQLInjectionPrevention:
             # Should fail with auth error, not server error
             assert response.status_code == 401
 
-    def test_cluster_name_sql_injection(self, client, auth_headers, monkeypatch):
+    def test_cluster_name_sql_injection(self, client, admin_headers, monkeypatch):
         """Test SQL injection in cluster name field."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -97,7 +97,7 @@ class TestSQLInjectionPrevention:
             response = client.post(
                 "api/v1/grants",
                 json={"cluster_name": cluster_name, "role": "view"},
-                headers=auth_headers,
+                headers=admin_headers,
             )
             # Should succeed or fail with validation, not SQL error
             assert response.status_code in [
@@ -141,7 +141,7 @@ class TestInputValidation:
         # Pydantic should handle this
         assert response.status_code in [201, 422]
 
-    def test_cluster_name_length(self, client, auth_headers, monkeypatch):
+    def test_cluster_name_length(self, client, admin_headers, monkeypatch):
         """Test cluster name length validation."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -156,7 +156,7 @@ class TestInputValidation:
         response = client.post(
             "api/v1/grants",
             json={"cluster_name": long_name, "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
@@ -164,7 +164,7 @@ class TestInputValidation:
         # Should be handled gracefully
         assert response.status_code in [201, 400, 422]
 
-    def test_namespace_name_validation(self, client, auth_headers, monkeypatch):
+    def test_namespace_name_validation(self, client, admin_headers, monkeypatch):
         """Test namespace name validation."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".kubeconfig", delete=False
@@ -189,7 +189,7 @@ class TestInputValidation:
             response = client.post(
                 "api/v1/grants",
                 json={"cluster_name": "test", "namespace": ns, "role": "view"},
-                headers=auth_headers,
+                headers=admin_headers,
             )
             # Should accept or reject gracefully
             assert response.status_code in [201, 400, 422]
@@ -239,11 +239,12 @@ class TestAuthorizationSecurity:
 
     def test_user_cannot_access_other_user_grants(self, client, db_session):
         """Test that users can't access other users' grants."""
-        # Create two users
+        # Create two users - user1 is admin (needed to create grants)
         user1 = User(
             id=secrets.token_urlsafe(16),
             email="user1@example.com",
             hashed_password=get_password_hash("password123"),
+            is_admin=True,
         )
         user2 = User(
             id=secrets.token_urlsafe(16),
@@ -254,7 +255,7 @@ class TestAuthorizationSecurity:
         db_session.add(user2)
         db_session.commit()
 
-        # Login as user1
+        # Login as user1 (admin)
         response = client.post(
             "api/v1/login",
             json={"email": "user1@example.com", "password": "password123"},
@@ -349,7 +350,7 @@ class TestDataLeakage:
         assert "secretpassword123" not in str(data)
 
     def test_grant_encrypted_in_response(
-        self, client, db_session, auth_headers, auth_token, monkeypatch
+        self, client, db_session, admin_headers, monkeypatch
     ):
         """Test that kubeconfig is encrypted in responses."""
         import base64
@@ -367,13 +368,13 @@ class TestDataLeakage:
         response = client.post(
             "api/v1/grants",
             json={"cluster_name": "test-cluster", "role": "view"},
-            headers=auth_headers,
+            headers=admin_headers,
         )
 
         os.unlink(kubeconfig_path)
 
         # List grants - should not include raw kubeconfig
-        response = client.get("api/v1/grants", headers=auth_headers)
+        response = client.get("api/v1/grants", headers=admin_headers)
         data = response.json()
 
         for grant in data:
