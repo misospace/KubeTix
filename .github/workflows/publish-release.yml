@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
           FILES=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path' | sort)
-          EXPECTED=$'charts/kubetix/Chart.yaml\nkubetix-api/kubetix_api/__init__.py\nkubetix-api/main.py\nkubetix-api/manifests/kustomization.yaml\nkubetix-web/package-lock.json\nkubetix-web/package.json'
+          EXPECTED=$'charts/kubetix/Chart.yaml\nkubetix-api/kubetix_api/__init__.py\nkubetix-api/main.py\nkubetix-web/package-lock.json\nkubetix-web/package.json'
           if [ "$FILES" != "$EXPECTED" ]; then
             echo "Release PR changed unexpected files:"
             echo "$FILES"
@@ -84,7 +84,6 @@ jobs:
               "kubetix-api/kubetix_api/__init__.py": f'__version__ = "{version}"',
               "kubetix-api/main.py": f'    version="{version}",',
               "charts/kubetix/Chart.yaml": f'version: {version}',
-              "kubetix-api/manifests/kustomization.yaml": f'  version: "{version}"',
           }
           for filename, expected in checks.items():
               if expected not in Path(filename).read_text():

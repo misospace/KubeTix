@@ -39,8 +39,7 @@ There's also a Helm chart in `charts/kubetix/` for Kubernetes deployment.
 ├── kubetix-api/             # FastAPI backend
 │   ├── main.py              # API application (routes, models, auth)
 │   ├── requirements.txt     # API dependencies
-│   ├── Dockerfile
-│   └── manifests/           # Kubernetes deployment manifests
+│   └── Dockerfile
 │
 ├── kubetix-web/             # Next.js web dashboard
 │   ├── app/                 # App Router pages
@@ -186,7 +185,7 @@ KubeTix releases are started manually and completed by GitHub Actions. The versi
 #### Steps
 
 1. Open **Actions → Manual Release → Run workflow** and enter a plain semver version such as `0.1.1`.
-2. Follow the linked release PR. It updates the API, web package, Helm chart, and manifest versions, then auto-merges after required checks pass.
+2. Follow the linked release PR. It updates the API, web package, and Helm chart versions, then auto-merges after required checks pass.
 3. `Publish Release` verifies every version source, tags the merge commit, and creates the GitHub release.
 
 If a Docker image should be published, run **Build, Publish & E2E** manually against the release tag.
@@ -194,7 +193,7 @@ If a Docker image should be published, run **Build, Publish & E2E** manually aga
 #### Version convention
 
 - Tags use plain semver (e.g. `0.1.0`, no `v` prefix)
-- Release automation keeps the web package, API, Helm chart, and Kubernetes manifest versions aligned
+- Release automation keeps the web package, API, and Helm chart versions aligned
 
 #### Validation gates
 

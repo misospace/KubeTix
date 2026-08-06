@@ -44,7 +44,7 @@ The following table lists the configurable parameters of the KubeTix chart and t
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.repository` | API image repository | `ghcr.io/joryirving/kubetix-api` |
+| `image.repository` | API image repository | `ghcr.io/misospace/kubetix-api` |
 | `image.tag` | API image tag | `Chart.AppVersion` |
 | `replicaCount` | Number of API replicas | `1` |
 | `service.type` | Service type | `ClusterIP` |

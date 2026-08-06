@@ -6,6 +6,7 @@ Self-host KubeTix on your Kubernetes cluster.
 
 - Kubernetes cluster (v1.25+)
 - kubectl configured
+- Helm 3
 - Ingress controller (nginx, traefik, etc.)
 - TLS certificates (cert-manager recommended)
 
@@ -17,46 +18,30 @@ Self-host KubeTix on your Kubernetes cluster.
 kubectl create namespace kubetix
 ```
 
-### 2. Create Secrets
+### 2. Deploy with Helm (Recommended)
+
+The bundled chart at `charts/kubetix/` is the single supported deployment path.
 
 ```bash
-# Generate secret key
-kubectl create secret generic kubetix-secrets \
+# Install from local chart
+helm install kubetix ./charts/kubetix \
   --namespace kubetix \
-  --from-literal=secret-key=$(openssl rand -hex 32) \
-  --from-literal=database-url=postgresql://kubetix:kubetix@kubetix-db:5432/kubetix
-
-# Create database credentials
-kubectl create secret generic kubetix-db-credentials \
-  --namespace kubetix \
-  --from-literal=username=kubetix \
-  --from-literal=password=kubetix
+  --set replicaCount=1 \
+  --set image.repository=ghcr.io/misospace/kubetix-api \
+  --set database.postgresql.auth.username=kubetix \
+  --set database.postgresql.auth.password=kubetix \
+  --set database.postgresql.auth.database=kubetix \
+  --set database.postgresql.persistence.size=10Gi
 ```
 
-### 3. Deploy with Helm (Recommended)
+### 3. Verify Deployment
 
 ```bash
-# Add Helm repo
-helm repo add kubetix https://joryirving.github.io/kubetix-helm
-helm repo update
-
-# Install
-helm install kubetix kubetix/kubetix \
-  --namespace kubetix \
-  --set api.replicas=1 \
-  --set web.replicas=1 \
-  --set db.postgresql.persistence.size=10Gi
-```
-
-### 4. Deploy with kubectl
-
-```bash
-# Apply all manifests
-kubectl apply -f manifests/
-
 # Wait for deployment
-kubectl rollout status deployment/kubetix-api -n kubetix
-kubectl rollout status deployment/kubetix-web -n kubetix
+kubectl rollout status deployment/kubetix -n kubetix
+
+# Check pods
+kubectl get pods -n kubetix
 ```
 
 ## Architecture
@@ -67,16 +52,16 @@ kubectl rollout status deployment/kubetix-web -n kubetix
 └──────┬──────┘
        │
        ▼
-┌─────────────┐     ┌─────────────┐
-│  kubetix    │────▶│  kubetix    │
-│    web      │     │    api      │
-└─────────────┘     └──────┬──────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │  kubetix-db │
-                    │ (PostgreSQL)│
-                    └─────────────┘
+┌─────────────┐
+│  kubetix    │
+│    api      │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  kubetix-db │
+│ (PostgreSQL)│
+└─────────────┘
 ```
 
 ## Components
@@ -87,30 +72,28 @@ kubectl rollout status deployment/kubetix-web -n kubetix
 - PostgreSQL database
 - 1-3 replicas recommended
 
-### kubetix-web
-- Next.js frontend
-- Static export (can run without Node.js)
-- 1-2 replicas recommended
-
-### kubetix-db
-- PostgreSQL 15
-- Persistent storage (10GB+)
-- Daily backups recommended
-
 ## Configuration
+
+The bundled chart at `charts/kubetix/` supports the following values. See `charts/kubetix/values.yaml` for the full reference.
+
+### Key Values
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `replicaCount` | Number of API replicas | `1` |
+| `image.repository` | Container image repository | `ghcr.io/misospace/kubetix-api` |
+| `image.tag` | Container image tag | Chart appVersion |
+| `database.postgresql.auth.username` | Database username | `kubetix` |
+| `database.postgresql.auth.password` | Database password | (generated) |
+| `database.postgresql.auth.database` | Database name | `kubetix` |
+| `database.postgresql.persistence.size` | PVC size | `8Gi` |
 
 ### Environment Variables
 
-#### API
 ```yaml
 DATABASE_URL: postgresql://kubetix:kubetix@kubetix-db:5432/kubetix
 KUBETIX_SECRET_KEY: <generated-secret>
 KUBECONFIG: /etc/kubeconfig/config (optional)
-```
-
-#### Web
-```yaml
-NEXT_PUBLIC_API_URL: http://kubetix-api:8000
 ```
 
 ### ConfigMap
@@ -153,7 +136,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: kubetix-web
+            name: kubetix
             port:
               number: 80
 ```
@@ -183,6 +166,15 @@ spec:
 ### Option 1: External PostgreSQL
 
 ```yaml
+database:
+  postgresql:
+    auth:
+      existingSecret: kubetix-db-external
+      usernameKey: username
+      passwordKey: password
+```
+
+```yaml
 apiVersion: v1
 kind: Secret
 metadata:
@@ -197,10 +189,10 @@ stringData:
   database: kubetix
 ```
 
-### Option 2: Bitnami PostgreSQL Helm Chart
+### Option 2: Bitnami PostgreSQL (bundled)
 
 ```yaml
-db:
+database:
   postgresql:
     auth:
       username: kubetix
@@ -220,18 +212,6 @@ db:
 ## Resource Limits
 
 ### API
-
-```yaml
-resources:
-  requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "256Mi"
-    cpu: "500m"
-```
-
-### Web
 
 ```yaml
 resources:
@@ -263,13 +243,13 @@ resources:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: kubetix-api-hpa
+  name: kubetix-hpa
   namespace: kubetix
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: kubetix-api
+    name: kubetix
   minReplicas: 1
   maxReplicas: 5
   metrics:
@@ -285,40 +265,12 @@ spec:
 
 ### Database Backups
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: kubetix-backup-credentials
-  namespace: kubetix
-stringData:
-  AWS_ACCESS_KEY_ID: <key>
-  AWS_SECRET_ACCESS_KEY: <secret>
-```
+```bash
+# Backup
+kubectl exec deployment/kubetix-db -n kubetix -- pg_dump -U kubetix kubetix > backup.sql
 
-```yaml
-apiVersion: batch.volcano.sh/v1alpha1
-kind: Job
-metadata:
-  name: kubetix-db-backup
-  namespace: kubetix
-spec:
-  tasks:
-  - replicas: 1
-    name: backup
-    template:
-      spec:
-        containers:
-        - name: backup
-          image: postgres:15-alpine
-          command: ["sh", "-c", "pg_dump -h kubetix-db -U kubetix kubetix > /backup/kubetix-$(date +%Y%m%d).sql"]
-          volumeMounts:
-          - name: backup
-            mountPath: /backup
-        volumes:
-        - name: backup
-          persistentVolumeClaim:
-            claimName: kubetix-backup-pvc
+# Restore
+kubectl exec -i deployment/kubetix-db -n kubetix -- psql -U kubetix kubetix < backup.sql
 ```
 
 ## Monitoring
@@ -334,7 +286,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: kubetix-api
+      app: kubetix
   endpoints:
   - port: http
     path: /metrics
@@ -355,7 +307,7 @@ Import dashboard ID `12345` (or create custom) with these metrics:
 
 ```bash
 # Check logs
-kubectl logs deployment/kubetix-api -n kubetix
+kubectl logs deployment/kubetix -n kubetix
 
 # Check secrets
 kubectl get secrets kubetix-secrets -n kubetix -o yaml
@@ -366,11 +318,11 @@ kubectl run debug --rm -it --image=postgres:15-alpine --restart=Never \
   -- psql -h kubetix-db -U kubetix -d kubetix
 ```
 
-### Web UI shows 502
+### API shows 502
 
 ```bash
 # Check API health
-kubectl port-forward svc/kubetix-api 8000 -n kubetix
+kubectl port-forward svc/kubetix 8000 -n kubetix
 curl http://localhost:8000/health
 
 # Check ingress
@@ -450,47 +402,7 @@ env:
   value: "https://kubetix.yourdomain.com/api/v1/auth/oidc/callback"
 ```
 
-### 4. Update Web Deployment
-
-```yaml
-env:
-- name: NEXT_PUBLIC_OIDC_ENABLED
-  value: "true"
-- name: NEXT_PUBLIC_OIDC_ISSUER
-  value: "https://authentik.yourdomain.com"
-```
-
-### 5. Authentik Ingress (for OIDC)
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: authentik-ingress
-  namespace: kubetix
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  ingressClassName: nginx
-  tls:
-  - hosts:
-    - authentik.yourdomain.com
-    secretName: authentik-tls
-  rules:
-  - host: authentik.yourdomain.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: authentik-server
-            port:
-              number: 80
-```
-
-### 6. Complete Authentik + KubeTix Stack
+### 4. Complete Authentik + KubeTix Stack
 
 ```yaml
 # docker-compose.yml for local testing
@@ -520,7 +432,7 @@ services:
       - ./kubetix/db:/var/lib/postgresql/data
 
   kubetix-api:
-    image: ghcr.io/joryirving/kubetix-api:latest
+    image: ghcr.io/misospace/kubetix-api:latest
     environment:
       - DATABASE_URL=postgresql://kubetix:kubetix@kubetix-db:5432/kubetix
       - OIDC_ENABLED=true
@@ -530,20 +442,9 @@ services:
       - OIDC_REDIRECT_URI=http://localhost:8000/api/v1/auth/oidc/callback
     depends_on:
       - kubetix-db
-
-  kubetix-web:
-    image: ghcr.io/joryirving/kubetix-web:latest
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_OIDC_ENABLED=true
-      - NEXT_PUBLIC_OIDC_ISSUER=http://localhost:9000
-    ports:
-      - "3000:3000"
-    depends_on:
-      - kubetix-api
 ```
 
-### 7. Environment Variables Reference
+### 5. Environment Variables Reference
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -554,7 +455,7 @@ services:
 | `OIDC_REDIRECT_URI` | Callback URL | `https://kubetix.yourdomain.com/api/v1/auth/oidc/callback` |
 | `OIDC_SCOPES` | OAuth scopes | `openid profile email` |
 
-### 8. Supported Providers
+### 6. Supported Providers
 
 KubeTix supports OIDC/OAuth2 with:
 
@@ -566,17 +467,17 @@ KubeTix supports OIDC/OAuth2 with:
 - ✅ **Azure AD**
 - ✅ **Any standard OIDC provider**
 
-### 9. Troubleshooting OIDC
+### 7. Troubleshooting OIDC
 
 ```bash
 # Check OIDC configuration
-kubectl exec deployment/kubetix-api -n kubetix -- env | grep OIDC
+kubectl exec deployment/kubetix -n kubetix -- env | grep OIDC
 
 # Test OIDC discovery
 curl https://authentik.yourdomain.com/.well-known/openid-configuration
 
 # Check auth logs
-kubectl logs deployment/kubetix-api -n kubetix | grep -i oidc
+kubectl logs deployment/kubetix -n kubetix | grep -i oidc
 ```
 
 ---
@@ -586,15 +487,14 @@ kubectl logs deployment/kubetix-api -n kubetix | grep -i oidc
 ### Rolling Update
 
 ```bash
-kubectl rollout restart deployment/kubetix-api -n kubetix
-kubectl rollout restart deployment/kubetix-web -n kubetix
+kubectl rollout restart deployment/kubetix -n kubetix
 ```
 
 ### Database Migration
 
 ```bash
 # Run migrations
-kubectl run kubetix-migrate --rm -it --image=kubetix-api:latest --restart=Never \
+kubectl run kubetix-migrate --rm -it --image=ghcr.io/misospace/kubetix-api:latest --restart=Never \
   --namespace kubetix \
   -- python -m alembic upgrade head
 ```
@@ -621,6 +521,6 @@ kubectl exec -i deployment/kubetix-db -n kubetix -- psql -U kubetix kubetix < ba
 
 ## Support
 
-- **Issues**: https://github.com/joryirving/KubeTix/issues
-- **Docs**: https://github.com/joryirving/KubeTix/blob/main/kubetix-api/README.md
+- **Issues**: https://github.com/misospace/KubeTix/issues
+- **Docs**: https://github.com/misospace/KubeTix/blob/main/kubetix-api/README.md
 - **Community**: Join our Discord (link in repo)
