@@ -26,11 +26,46 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response, 
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
-limiter = Limiter(
-    key_func=get_remote_address, default_limits=["200 per day", "50 per hour"]
-)
+
+# ---------------------------------------------------------------------------
+# Rate limiter key function: identify authenticated users by ID, fall back to
+# proxy-aware client IP so one user cannot exhaust a shared bucket and one
+# shared ingress IP cannot lock out the deployment.
+# ---------------------------------------------------------------------------
+def _rate_limit_key_func(request: Request) -> str:
+    """Return a rate-limit key that prefers the authenticated user ID."""
+    # Check for Authorization header to extract user identity
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            from kubetix_api.auth import ALGORITHM, SECRET_KEY
+
+            from jose import jwt
+
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            sub = payload.get("sub")
+            if sub:
+                return f"user:{sub}"
+        except Exception:
+            pass
+
+    # Fall back to proxy-aware client IP (X-Forwarded-For first hop, then X-Real-IP, then direct)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        # First IP in the chain is the original client
+        return f"ip:{forwarded_for.split(',')[0].strip()}"
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return f"ip:{real_ip.strip()}"
+
+    client_host = request.client.host if request.client else "unknown"
+    return f"ip:{client_host}"
+
+
+limiter = Limiter(key_func=_rate_limit_key_func)
 
 # ---------------------------------------------------------------------------
 # CORS middleware
@@ -313,7 +348,10 @@ async def logout(
 
 
 @v1_router.get("/users/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
+@limiter.limit("30 per minute")
+async def get_current_user_info(
+    request: Request, current_user: User = Depends(get_current_user)
+):
     return current_user
 
 
@@ -374,7 +412,9 @@ async def revoke_grant_endpoint(
 
 
 @v1_router.get("/audit", response_model=List[dict])
+@limiter.limit("20 per minute")
 async def get_audit_log_endpoint(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -398,7 +438,9 @@ from kubetix_api.teams import (  # noqa: E402
 @v1_router.post(
     "/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("10 per minute")
 async def create_team_endpoint(
+    request: Request,
     team_data: TeamCreate,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -407,7 +449,9 @@ async def create_team_endpoint(
 
 
 @v1_router.get("/teams", response_model=List[TeamResponse])
+@limiter.limit("30 per minute")
 async def list_teams_endpoint(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -415,7 +459,9 @@ async def list_teams_endpoint(
 
 
 @v1_router.get("/teams/{team_id}", response_model=TeamResponse)
+@limiter.limit("30 per minute")
 async def get_team_endpoint(
+    request: Request,
     team_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -424,7 +470,9 @@ async def get_team_endpoint(
 
 
 @v1_router.post("/teams/{team_id}/members", response_model=TeamMemberResponse)
+@limiter.limit("20 per minute")
 async def add_team_member_endpoint(
+    request: Request,
     team_id: str,
     member_data: TeamMemberCreate,
     current_user: User = Depends(get_current_user),
@@ -436,7 +484,9 @@ async def add_team_member_endpoint(
 @v1_router.delete(
     "/teams/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT
 )
+@limiter.limit("20 per minute")
 async def remove_team_member_endpoint(
+    request: Request,
     team_id: str,
     user_id: str,
     current_user: User = Depends(get_current_user),
@@ -448,7 +498,9 @@ async def remove_team_member_endpoint(
 
 
 @v1_router.get("/teams/{team_id}/members", response_model=List[TeamMemberResponse])
+@limiter.limit("30 per minute")
 async def list_team_members_endpoint(
+    request: Request,
     team_id: str,
     current_user: User = Depends(get_current_user),
     db=Depends(get_db),
@@ -651,7 +703,9 @@ async def sso_callback(
 
 
 @v1_router.get("/auth/sso/{provider}/login")
+@limiter.limit("10 per minute")
 async def sso_login(
+    request: Request,
     provider: str,
     db=Depends(get_db),
 ):
@@ -813,7 +867,9 @@ async def oidc_callback(
 
 
 @v1_router.get("/auth/oidc/login")
+@limiter.limit("10 per minute")
 async def oidc_login(
+    request: Request,
     db=Depends(get_db),
 ):
     """Initiate OIDC login with configured provider."""
@@ -857,7 +913,10 @@ async def oidc_login(
 
 
 @v1_router.get("/auth/oidc/userinfo")
-async def oidc_userinfo(current_user: User = Depends(get_current_user)):
+@limiter.limit("30 per minute")
+async def oidc_userinfo(
+    request: Request, current_user: User = Depends(get_current_user)
+):
     """Get current user info with OIDC attributes."""
     return {
         "id": current_user.id,

@@ -212,6 +212,114 @@ class TestRateLimitConfiguration:
         ), f"Expected 401 for wrong password, got: {response.status_code}"
 
 
+class TestPreviouslyUnlimitedEndpoints:
+    """Tests verifying that endpoints previously missing rate limits are now limited.
+
+    These endpoints had no @limiter.limit() decorator before the fix:
+    - /api/v1/teams (GET, POST)
+    - /api/v1/audit (GET)
+    - /api/v1/users/me (GET)
+    - /api/v1/auth/sso/{provider}/login (GET)
+    - /api/v1/auth/oidc/login (GET)
+    """
+
+    def test_teams_list_rate_limit(self, client, db_session, test_user):
+        """Test that GET /teams is rate limited.
+
+        Teams list has a limit of 30 per minute. After 30 requests,
+        subsequent requests should return 429.
+        """
+        response = client.post(
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
+        )
+        token = response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        results = []
+        for i in range(35):
+            response = client.get("api/v1/teams", headers=headers)
+            results.append(response.status_code)
+
+        assert (
+            429 in results
+        ), f"Expected at least one 429 after exceeding rate limit on /teams, got: {results}"
+
+    def test_audit_log_rate_limit(self, client, db_session, test_user):
+        """Test that GET /audit is rate limited.
+
+        Audit log has a limit of 20 per minute. After 20 requests,
+        subsequent requests should return 429.
+        """
+        response = client.post(
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
+        )
+        token = response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        results = []
+        for i in range(25):
+            response = client.get("api/v1/audit", headers=headers)
+            results.append(response.status_code)
+
+        assert (
+            429 in results
+        ), f"Expected at least one 429 after exceeding rate limit on /audit, got: {results}"
+
+    def test_users_me_rate_limit(self, client, db_session, test_user):
+        """Test that GET /users/me is rate limited.
+
+        Users me has a limit of 30 per minute. After 30 requests,
+        subsequent requests should return 429.
+        """
+        response = client.post(
+            "api/v1/login",
+            json={"email": "test@example.com", "password": "testpassword123"},
+        )
+        token = response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        results = []
+        for i in range(35):
+            response = client.get("api/v1/users/me", headers=headers)
+            results.append(response.status_code)
+
+        assert (
+            429 in results
+        ), f"Expected at least one 429 after exceeding rate limit on /users/me, got: {results}"
+
+    def test_sso_login_rate_limit(self, client, db_session, test_user):
+        """Test that GET /auth/sso/{provider}/login is rate limited.
+
+        SSO login has a limit of 10 per minute. After 10 requests,
+        subsequent requests should return 429.
+        """
+        results = []
+        for i in range(15):
+            response = client.get("api/v1/auth/sso/google/login")
+            results.append(response.status_code)
+
+        assert (
+            429 in results
+        ), f"Expected at least one 429 after exceeding rate limit on SSO login, got: {results}"
+
+    def test_oidc_login_rate_limit(self, client, db_session, test_user):
+        """Test that GET /auth/oidc/login is rate limited.
+
+        OIDC login has a limit of 10 per minute. After 10 requests,
+        subsequent requests should return 429.
+        """
+        results = []
+        for i in range(15):
+            response = client.get("api/v1/auth/oidc/login")
+            results.append(response.status_code)
+
+        assert (
+            429 in results
+        ), f"Expected at least one 429 after exceeding rate limit on OIDC login, got: {results}"
+
+
 # Documentation of current rate limits
 """
 Current Rate Limits (slowapi):
