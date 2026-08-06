@@ -89,7 +89,6 @@ class TestKubeTixE2E:
         )
         return response.json()["access_token"]
 
-
     def test_01_api_health(self, wait_for_api):
         """Test API health endpoint."""
         response = requests.get(f"{wait_for_api}/api/v1/health")
