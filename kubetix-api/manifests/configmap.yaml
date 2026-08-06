@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kubetix-config
-  namespace: kubetix
-data:
-  API_URL: http://kubetix-api:8000
-  MAX_GRANT_HOURS: "720"
-  DEFAULT_GRANT_HOURS: "24"
