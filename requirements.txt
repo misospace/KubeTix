@@ -1,17 +1,29 @@
-cryptography>=50.0.0,<50.1.0
-slowapi>=0.1.9,<0.2.0
+# Runtime dependencies
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
+sqlalchemy==2.0.51
+python-jose[cryptography]==3.5.0
+bcrypt>=5.0.0,<5.1.0  # pinned to <5.1; bcrypt 5.x breaks passlib's CryptContext
+python-multipart==0.0.32
+pydantic==2.13.4
+cryptography==50.0.0
+httpx==0.28.1
+slowapi==0.1.10
 
-bcrypt>=5.0.0,<6.0.0
+# PostgreSQL drivers (issue #310). ``psycopg2-binary`` is the default
+# SQLAlchemy driver for ``postgresql://`` / ``postgresql+psycopg2://``
+# URLs and is what ``DATABASE_URL`` in the bundled Helm chart resolves
+# to. ``psycopg[binary]`` (psycopg 3) is installed alongside it for
+# ``postgresql+psycopg://`` URLs and because it ships manylinux_2_28
+# wheels for newer CPython releases (3.13+), avoiding source builds
+# on slim container images where libpq headers are absent. The source
+# build fallback for ``psycopg2-binary`` is enabled in the Dockerfile
+# (libpq-dev) for the (transient) window before upstream publishes a
+# wheel for the newest CPython.
+psycopg2-binary>=2.9.10
+psycopg[binary]>=3.2.0,<4.0.0
 
 # Test dependencies
 pytest>=9.1.1,<9.2.0
 pytest-asyncio>=1.4.0,<1.5.0
-httpx>=0.25.0,<0.29.0
 requests>=2.31.0,<3.0.0
-
-# Runtime dependencies (required by kubetix-api for tests)
-fastapi>=0.104.0,<1.0.0
-sqlalchemy>=2.0.0,<3.0.0
-pydantic>=2.0.0,<3.0.0
-python-jose[cryptography]>=3.3.0,<4.0.0
-
