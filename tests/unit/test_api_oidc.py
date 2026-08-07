@@ -286,6 +286,7 @@ class TestSSORoundTrip:
                 "email": "sso-test@example.com",
                 "name": "SSO Test User",
                 "sub": "google-12345",
+                "email_verified": True,
             },
         )
 
@@ -336,6 +337,7 @@ class TestSSORoundTrip:
                 "email": "oidc-test@example.com",
                 "name": "OIDC Test User",
                 "sub": "oidc-67890",
+                "email_verified": True,
             },
         ):
             response = client.get(
@@ -385,7 +387,12 @@ class TestSSORoundTrip:
         )
         mock_userinfo_resp = httpx.Response(
             200,
-            json={"email": "reuse@example.com", "name": "Reuse", "sub": "sub-1"},
+            json={
+                "email": "reuse@example.com",
+                "name": "Reuse",
+                "sub": "sub-1",
+                "email_verified": True,
+            },
         )
 
         # 2. First callback succeeds
@@ -450,7 +457,12 @@ class TestSSORoundTrip:
         # 4. Callback with the correct csrf_state succeeds (token exchange mocked)
         mock_userinfo_resp = httpx.Response(
             200,
-            json={"email": "csrf@example.com", "name": "CSRF", "sub": "sub-csrf"},
+            json={
+                "email": "csrf@example.com",
+                "name": "CSRF",
+                "sub": "sub-csrf",
+                "email_verified": True,
+            },
         )
         with patch("httpx.post", return_value=mock_token_resp), patch(
             "httpx.get", return_value=mock_userinfo_resp
@@ -732,3 +744,139 @@ class TestOIDCEndpointsDiscovery:
         assert endpoints["token_endpoint"] == "https://idp.test/api/token"
         # userinfo missing from doc → fall back to legacy path.
         assert endpoints["userinfo_endpoint"] == "https://idp.test/oauth/userinfo"
+
+
+class TestEmailVerifiedCheck:
+    """Tests for ``_check_email_verified`` — the guard that prevents
+    provisioning with unverified emails."""
+
+    def test_rejects_unverified_email(self):
+        from kubetix_api.oidc import _check_email_verified
+        from fastapi import HTTPException
+
+        userinfo = {"email": "user@example.com", "email_verified": False}
+        with pytest.raises(HTTPException) as exc_info:
+            _check_email_verified(userinfo, "test-provider")
+        assert exc_info.value.status_code == 403
+        assert "Email not verified" in str(exc_info.value.detail)
+
+    def test_rejects_missing_email_verified(self):
+        from kubetix_api.oidc import _check_email_verified
+        from fastapi import HTTPException
+
+        userinfo = {"email": "user@example.com"}
+        with pytest.raises(HTTPException) as exc_info:
+            _check_email_verified(userinfo, "test-provider")
+        assert exc_info.value.status_code == 403
+
+    def test_allows_verified_email(self):
+        from kubetix_api.oidc import _check_email_verified
+
+        userinfo = {"email": "user@example.com", "email_verified": True}
+        # Should not raise
+        _check_email_verified(userinfo, "test-provider")
+
+    def test_skips_when_env_disabled(self, monkeypatch):
+        from kubetix_api.oidc import _check_email_verified
+
+        monkeypatch.setenv("SSO_REQUIRE_EMAIL_VERIFIED", "false")
+        # Force re-read of the env var by patching the module-level flag
+        import kubetix_api.oidc as oidc_mod
+
+        original = oidc_mod.SSO_REQUIRE_EMAIL_VERIFIED
+        try:
+            oidc_mod.SSO_REQUIRE_EMAIL_VERIFIED = False
+            userinfo = {"email": "user@example.com", "email_verified": False}
+            # Should not raise when the flag is disabled
+            _check_email_verified(userinfo, "test-provider")
+        finally:
+            oidc_mod.SSO_REQUIRE_EMAIL_VERIFIED = original
+
+
+class TestIdTokenValidation:
+    """Tests for ``_validate_id_token`` — iss / aud claim checks."""
+
+    def test_accepts_valid_token(self):
+        from kubetix_api.oidc import _validate_id_token
+        from jose import jwt
+
+        payload = {
+            "iss": "https://accounts.google.com",
+            "aud": "my-client-id",
+            "sub": "123456789",
+            "email": "user@example.com",
+        }
+        token = jwt.encode(payload, "secret", algorithm="HS256")
+        result = _validate_id_token(
+            token, "https://accounts.google.com", "my-client-id"
+        )
+        assert result["sub"] == "123456789"
+
+    def test_rejects_wrong_issuer(self):
+        from kubetix_api.oidc import _validate_id_token
+        from jose import jwt
+        from fastapi import HTTPException
+
+        payload = {
+            "iss": "https://evil.example.com",
+            "aud": "my-client-id",
+        }
+        token = jwt.encode(payload, "secret", algorithm="HS256")
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+        assert exc_info.value.status_code == 400
+        assert "issuer mismatch" in str(exc_info.value.detail).lower()
+
+    def test_rejects_wrong_audience(self):
+        from kubetix_api.oidc import _validate_id_token
+        from jose import jwt
+        from fastapi import HTTPException
+
+        payload = {
+            "iss": "https://accounts.google.com",
+            "aud": "other-client-id",
+        }
+        token = jwt.encode(payload, "secret", algorithm="HS256")
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+        assert exc_info.value.status_code == 400
+        assert "audience mismatch" in str(exc_info.value.detail).lower()
+
+    def test_rejects_missing_aud(self):
+        from kubetix_api.oidc import _validate_id_token
+        from jose import jwt
+        from fastapi import HTTPException
+
+        payload = {
+            "iss": "https://accounts.google.com",
+        }
+        token = jwt.encode(payload, "secret", algorithm="HS256")
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+        assert exc_info.value.status_code == 400
+        assert "aud" in str(exc_info.value.detail).lower()
+
+    def test_accepts_aud_as_list(self):
+        from kubetix_api.oidc import _validate_id_token
+        from jose import jwt
+
+        payload = {
+            "iss": "https://accounts.google.com",
+            "aud": ["other-client-id", "my-client-id"],
+            "sub": "123456789",
+        }
+        token = jwt.encode(payload, "secret", algorithm="HS256")
+        result = _validate_id_token(
+            token, "https://accounts.google.com", "my-client-id"
+        )
+        assert result["sub"] == "123456789"
+
+    def test_rejects_malformed_token(self):
+        from kubetix_api.oidc import _validate_id_token
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_id_token(
+                "not.a.token", "https://accounts.google.com", "my-client-id"
+            )
+        assert exc_info.value.status_code == 400
