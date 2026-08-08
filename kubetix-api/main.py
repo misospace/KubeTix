@@ -638,6 +638,16 @@ async def sso_callback(
             status_code=401, detail="No access token received from provider"
         )
 
+    # Validate ID token iss/aud claims (if present — GitHub does not return one)
+    id_token = token_data.get("id_token")
+    if id_token:
+        from kubetix_api.oidc import _validate_id_token
+
+        issuer = cfg.get("issuer", "") or os.environ.get(
+            "OIDC_ISSUER", "https://accounts.google.com"
+        )
+        _validate_id_token(id_token, issuer, client_id)
+
     headers = (
         {"Authorization": f"Bearer {access_token}"}
         if provider != "github"
@@ -680,6 +690,11 @@ async def sso_callback(
         raise HTTPException(
             status_code=401, detail="Provider did not return an email address"
         )
+
+    # Verify email is confirmed by the provider (when supported)
+    from kubetix_api.oidc import _check_email_verified
+
+    _check_email_verified(userinfo, provider)
 
     sso_id = str(
         userinfo.get("sub") or userinfo.get("id") or userinfo.get("github_id", "")
@@ -826,10 +841,17 @@ async def oidc_callback(
         )
 
     access_token = token_data.get("access_token")
+    id_token = token_data.get("id_token")
     if not access_token:
         raise HTTPException(
             status_code=401, detail="No access token received from OIDC provider"
         )
+
+    # Validate ID token iss/aud claims (if present)
+    if id_token:
+        from kubetix_api.oidc import _validate_id_token
+
+        _validate_id_token(id_token, oidc_issuer, oidc_client_id)
 
     try:
         userinfo = _get_userinfo(issuer=oidc_issuer, access_token=access_token)
@@ -844,6 +866,11 @@ async def oidc_callback(
         raise HTTPException(
             status_code=401, detail="OIDC provider did not return an email address"
         )
+
+    # Verify email is confirmed by the provider (when supported)
+    from kubetix_api.oidc import _check_email_verified
+
+    _check_email_verified(userinfo, "OIDC provider")
 
     full_name = userinfo.get("name") or userinfo.get("preferred_username")
     sso_id = str(userinfo.get("sub", ""))
