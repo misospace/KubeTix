@@ -10,12 +10,36 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
+from sqlalchemy.types import DateTime as SADateTime
 
 Base = declarative_base()
+
+
+class TZDateTime(TypeDecorator):
+    """DateTime that always returns timezone-aware UTC values, even from SQLite.
+
+    SQLite does not natively support timezone-aware datetimes. This type ensures
+    that all datetime values are returned with UTC timezone attached, regardless
+    of the underlying database backend. Fixes issue #313.
+    """
+
+    impl = SADateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -33,9 +57,9 @@ class User(Base):  # noqa: N801
     is_admin = Column(Boolean, default=False)
     sso_provider = Column(String(50), nullable=True)
     sso_id = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        TZDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -48,9 +72,9 @@ class Team(Base):  # noqa: N801
     name = Column(String(255), nullable=False)
     description = Column(Text)
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        TZDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -63,7 +87,7 @@ class TeamMember(Base):  # noqa: N801
     team_id = Column(String(36), ForeignKey("teams.id"), nullable=False)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     role = Column(String(50), nullable=False)  # owner, admin, member
-    joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    joined_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (UniqueConstraint("team_id", "user_id", name="uq_team_user"),)
 
@@ -80,9 +104,9 @@ class AuthCode(Base):  # noqa: N801
     code_challenge = Column(String(128), nullable=False)
     state = Column(String(128), nullable=False)
     provider = Column(String(50), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(TZDateTime, nullable=False)
     used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Grant(Base):  # noqa: N801
@@ -94,11 +118,11 @@ class Grant(Base):  # noqa: N801
     namespace = Column(String(255), nullable=True)
     role = Column(String(50), nullable=False)
     encrypted_kubeconfig = Column(Text, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(TZDateTime, nullable=False)
     revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        TZDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -112,7 +136,7 @@ class AuditLog(Base):  # noqa: N801
     grant_id = Column(String(36), ForeignKey("grants.id"), nullable=True)
     action = Column(String(50), nullable=False)
     details = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class BlacklistedToken(Base):  # noqa: N801
@@ -127,8 +151,8 @@ class BlacklistedToken(Base):  # noqa: N801
 
     id = Column(String(36), primary_key=True, default=lambda: secrets.token_urlsafe(16))
     jti = Column(String(255), unique=True, index=True, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(TZDateTime, nullable=False)
+    created_at = Column(TZDateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------

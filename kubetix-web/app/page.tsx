@@ -298,9 +298,16 @@ export default function Home() {
 
   const getTimeRemaining = (expiresAt: string) => {
     const now = new Date()
-    const expiry = new Date(expiresAt)
+    let expiry = new Date(expiresAt)
+
+    // Safety net: if the API returns a naive datetime (no offset), treat it as UTC.
+    // With timezone-aware columns, expiresAt should include +00:00 or Z suffix.
+    if (isNaN(expiry.getTime())) {
+      return "Expired"
+    }
+
     const diff = expiry.getTime() - now.getTime()
-    
+
     if (diff <= 0) return "Expired"
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m remaining`
     return `${Math.floor(diff / 3600000)}h remaining`
