@@ -130,4 +130,17 @@ def init_db() -> None:
 # Backward-compatible alias for code that imports SessionLocal directly
 # ---------------------------------------------------------------------------
 
-SessionLocal = get_session_factory()
+
+class _SessionLocalProxy:
+    """Proxy that always delegates to the current session factory.
+
+    After ``reset_engine()`` clears the cached ``_SessionLocal``, this proxy
+    ensures that subsequent calls to ``SessionLocal()`` pick up the rebuilt
+    factory instead of a stale reference to the disposed one.
+    """
+
+    def __call__(self, *args, **kwargs):
+        return get_session_factory()(*args, **kwargs)
+
+
+SessionLocal = _SessionLocalProxy()
