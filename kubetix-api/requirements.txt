@@ -1,3 +1,15 @@
+# Authoritative source of truth for the kubetix-api service. Installed by
+# `kubetix-api/Dockerfile` in production. Exact-pinned on purpose so the API
+# image is reproducible across rebuilds.
+#
+# The repository root also has a `requirements.txt` that overlaps with this
+# file. It exists for two reasons: (1) the root Dockerfile builds a small CLI
+# image that runs `kc-share.py`, and (2) the repo-root test runner needs the
+# API's Python deps on PYTHONPATH without having to bootstrap the
+# kubetix-api image first. Whenever a shared dependency is bumped here, the
+# corresponding loose range in `../requirements.txt` must be loosened to
+# include the new exact version. The reverse direction does NOT need to be
+# mirrored: this file is the single source of truth for the service.
 fastapi==0.141.1
 uvicorn[standard]==0.52.1
 sqlalchemy==2.0.51
