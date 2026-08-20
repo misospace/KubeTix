@@ -68,6 +68,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "kubetix.secretName" . }}
                   key: secret-key
+            - name: KUBECONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubetix.secretName" . }}
+                  key: KUBECONFIG_ENCRYPTION_KEY
+                  optional: true
             {{- if .Values.database.sqlite.enabled }}
             - name: DATA_DIR
               value: /app/data

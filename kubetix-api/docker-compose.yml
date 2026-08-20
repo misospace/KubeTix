@@ -9,6 +9,11 @@ services:
       - DATABASE_URL=postgresql://kubetix:kubetix@db:5432/kubetix
       - KUBETIX_SECRET_KEY=${KUBETIX_SECRET_KEY:-dev-secret-key-change-in-production}
       - KUBECONFIG=/root/.kube/config
+      # Fernet key used to encrypt kubeconfig blobs at rest in grant rows.
+      # Without this set the API returns a clear 503 on grant creation/download.
+      # Generate with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - KUBECONFIG_ENCRYPTION_KEY=${KUBECONFIG_ENCRYPTION_KEY:-Z3Vuc3R1ZmYtdGhhdC1tZWV0cy10aGUtMzItYnl0ZS1yZXF1aXJlbWVudA==}
     volumes:
       - ./data:/app/data
       - ~/.kube:/root/.kube:ro
