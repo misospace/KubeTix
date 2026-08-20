@@ -1,0 +1,19 @@
+# Issue #354: the CI build uses `context: kubetix-api`, so the root
+# .dockerignore does not apply to the API image. Keep test artifacts and
+# non-runtime files out of the build context so `COPY . .` does not ship
+# them into the production image.
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+test_default.sqlite
+*.sqlite
+*.md
+migrate_add_fk.py
+Dockerfile
+.dockerignore
+docker-compose.yml
+.venv/
+venv/
