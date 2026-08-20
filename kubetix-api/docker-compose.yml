@@ -13,7 +13,7 @@ services:
       # Without this set the API returns a clear 503 on grant creation/download.
       # Generate with:
       #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      - KUBECONFIG_ENCRYPTION_KEY=${KUBECONFIG_ENCRYPTION_KEY:-Z3Vuc3R1ZmYtdGhhdC1tZWV0cy10aGUtMzItYnl0ZS1yZXF1aXJlbWVudA==}
+      - KUBECONFIG_ENCRYPTION_KEY=${KUBECONFIG_ENCRYPTION_KEY:-M27nAljv8sE6zMOVJfSTZha1aHgHrPIF3Vk6ZVhcTCk=}
     volumes:
       - ./data:/app/data
       - ~/.kube:/root/.kube:ro

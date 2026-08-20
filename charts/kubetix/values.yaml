@@ -198,12 +198,42 @@ externalSecrets:
     # Encryption provider (aesgcm or aescbc)
     provider: "aesgcm"
 
+# Fernet key used to encrypt stored kubeconfigs (env: KUBECONFIG_ENCRYPTION_KEY).
+# REQUIRED in production: grant kubeconfigs are encrypted at rest with this key, so
+# losing it makes existing grants unrecoverable and a compromised key lets anyone
+# decrypt stored kubeconfigs.
+#
+# Generate a fresh key with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Then pass it via:
+#   --set kubeconfigEncryptionKey.value="<generated-key>"
+# or uncomment the value field below. Leaving the default in production is insecure.
+
 # Environment variables
 env: {}
   # API_URL: http://kubetix-api:8000
   # MAX_GRANT_HOURS: "720"
   # DEFAULT_GRANT_HOURS: "24"
-  # KUBECONFIG_ENCRYPTION_KEY: "generate-with-Python-cryptography-Fernet"
+
+# Fernet key used to encrypt stored kubeconfigs (env: KUBECONFIG_ENCRYPTION_KEY).
+# REQUIRED in production: grant kubeconfigs are encrypted at rest with this key, so
+# losing it makes existing grants unrecoverable and a compromised key lets anyone
+# decrypt stored kubeconfigs.
+#
+# Generate a fresh key with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Then pass it via:
+#   --set kubeconfigEncryptionKey.value="<generated-key>"
+# or set the `value` field below. Leaving the default in production is insecure.
+kubeconfigEncryptionKey:
+  # Fernet key (URL-safe base64-encoded 32 bytes). A non-production default is
+  # auto-injected into the rendered Secret so the chart installs cleanly; override
+  # this in any deployment that handles real kubeconfigs.
+  value: ""
+  # Existing Kubernetes Secret name that already holds KUBECONFIG_ENCRYPTION_KEY.
+  # When set, the chart will NOT create or override that Secret. Leave empty to use
+  # the chart-managed Secret.
+  existingSecret: ""
 
 # Custom labels for resources
 customLabels: {}
