@@ -203,6 +203,7 @@ env: {}
   # API_URL: http://kubetix-api:8000
   # MAX_GRANT_HOURS: "720"
   # DEFAULT_GRANT_HOURS: "24"
+  # KUBECONFIG_ENCRYPTION_KEY: "generate-with-Python-cryptography-Fernet"
 
 # Custom labels for resources
 customLabels: {}

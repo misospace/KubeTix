@@ -33,6 +33,25 @@ def _get_fernet() -> Fernet:
     return Fernet(key.encode())
 
 
+def _encryption_key_error_response(exc: ValueError) -> HTTPException:
+    """Translate a missing/invalid KUBECONFIG_ENCRYPTION_KEY into a clear 503.
+
+    Generates an actionable error message explaining how to fix the issue
+    instead of leaking an opaque 500 to operators.
+    """
+    message = (
+        "Server is misconfigured: KUBECONFIG_ENCRYPTION_KEY is not set or is "
+        'invalid. Generate a Fernet key with `python -c "from cryptography.fernet '
+        'import Fernet; print(Fernet.generate_key().decode())"` and set it via '
+        "the kubetix-api-secrets Secret (key: KUBECONFIG_ENCRYPTION_KEY), the "
+        "KUBECONFIG_ENCRYPTION_KEY env var, or the bundled docker-compose. "
+        f"Underlying error: {exc}"
+    )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=message
+    )
+
+
 # ---------------------------------------------------------------------------
 # Grant operations
 # ---------------------------------------------------------------------------
@@ -94,7 +113,10 @@ def create_grant(
     with open(kubeconfig_path) as f:
         kubeconfig = f.read()
 
-    fernet = _get_fernet()
+    try:
+        fernet = _get_fernet()
+    except ValueError as exc:
+        raise _encryption_key_error_response(exc) from exc
     encrypted_kubeconfig = fernet.encrypt(kubeconfig.encode()).decode()
 
     expires_at = datetime.now(timezone.utc) + timedelta(hours=grant_data.expiry_hours)
@@ -144,7 +166,10 @@ def get_grant(grant_id: str, current_user: User, db) -> GrantWithKubeconfig:
     if datetime.now(timezone.utc) > expires_at:
         raise HTTPException(status_code=400, detail="Grant has expired")
 
-    fernet = _get_fernet()
+    try:
+        fernet = _get_fernet()
+    except ValueError as exc:
+        raise _encryption_key_error_response(exc) from exc
     kubeconfig = fernet.decrypt(grant.encrypted_kubeconfig.encode()).decode()
 
     # Log the download event in the audit log
