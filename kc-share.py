@@ -9,7 +9,6 @@ import json
 import os
 import secrets
 import sqlite3
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,9 +17,13 @@ from typing import Optional
 try:
     from cryptography.fernet import Fernet
 except ImportError:
-    print("Installing cryptography...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "cryptography"])
-    from cryptography.fernet import Fernet
+    sys.stderr.write(
+        "Error: the 'cryptography' package is required but not installed.\n"
+        "Install dependencies with:\n"
+        "    pip install -r requirements.txt\n"
+        "or use the CLI container image, which ships with all dependencies.\n"
+    )
+    sys.exit(1)
 
 # Configuration
 DB_PATH = Path.home() / ".kc-share" / "db.sqlite"
