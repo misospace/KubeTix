@@ -4,64 +4,251 @@ import hashlib
 import base64
 import os
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException, Request, Depends, status
-from jose import jwt
-from jose.exceptions import JWTError
+from jose import jwt, jwk
+from jose.exceptions import JWTError, JWSError, JWTClaimsError
 
 from kubetix_api.database import get_db, SessionLocal
 from kubetix_api.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from kubetix_api.models import User, provision_user
 
 # ---------------------------------------------------------------------------
-# ID token validation (iss / aud)
+# ID token validation (signature + iss / aud / exp / nbf)
 # ---------------------------------------------------------------------------
 
+# Algorithms accepted for OIDC ID tokens. ``none`` is deliberately excluded:
+# tokens without a signature (alg == "none") are never trusted, regardless of
+# claims. Only asymmetric algorithms are listed because OIDC providers sign
+# ID tokens with their published JWKS.
+_ALLOWED_ID_TOKEN_ALGS = (
+    "RS256",
+    "RS384",
+    "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
+    "ES256",
+    "ES384",
+    "ES512",
+)
 
-def _validate_id_token(id_token: str, issuer: str, client_id: str) -> dict:
-    """Decode an OIDC ID token and validate ``iss`` and ``aud`` claims.
+# In-process JWKS cache keyed by ``jwks_uri``; value is ``(fetched_at, jwks)``.
+_JWKS_CACHE: dict[str, tuple[float, dict]] = {}
+_JWKS_CACHE_LOCK = threading.Lock()
+_JWKS_CACHE_TTL_SECONDS = 3600.0
 
-    Returns the decoded payload on success. Raises ``HTTPException`` if the
-    token is malformed or its claims do not match the configured issuer /
-    client id.
+
+def _fetch_jwks(issuer: str, jwks_uri_override: Optional[str] = None) -> dict:
+    """Return the provider's JWKS document for ``issuer`` (cached).
+
+    The JWKS URI is resolved from the OIDC Discovery document
+    (``{issuer}/.well-known/openid-configuration``) which is fetched by
+    :func:`_fetch_oidc_discovery`. Results are cached per ``jwks_uri`` for
+    :data:`_JWKS_CACHE_TTL_SECONDS` seconds so repeated SSO callbacks do not
+    hammer the provider.
+
+    ``jwks_uri_override`` lets callers (notably tests) point verification at
+    a local JWKS without changing the configured issuer.
     """
+    import httpx
+
+    if jwks_uri_override:
+        jwks_uri = jwks_uri_override
+    else:
+        discovery = _fetch_oidc_discovery(issuer) or {}
+        jwks_uri = discovery.get("jwks_uri")
+        if not jwks_uri:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"OIDC discovery for {issuer!r} did not advertise a "
+                    "jwks_uri; cannot verify ID token signature"
+                ),
+            )
+
+    now = time.monotonic()
+    with _JWKS_CACHE_LOCK:
+        cached = _JWKS_CACHE.get(jwks_uri)
+        if cached and (now - cached[0]) < _JWKS_CACHE_TTL_SECONDS:
+            return cached[1]
+
     try:
-        # Decode without signature verification (we rely on the provider's
-        # transport security; full JWK-based verification would require
-        # fetching and caching the JWKS endpoint). We still validate the
-        # structural claims that protect against token misuse.
-        payload = jwt.get_unverified_claims(id_token)
+        response = httpx.get(jwks_uri, timeout=_OIDC_DISCOVERY_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        jwks = response.json()
+    except Exception as exc:  # noqa: BLE001 — surface as HTTP 502 for caller
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch JWKS from {jwks_uri!r}: {exc}",
+        ) from exc
+
+    if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Malformed JWKS document from {jwks_uri!r}",
+        )
+
+    with _JWKS_CACHE_LOCK:
+        _JWKS_CACHE[jwks_uri] = (time.monotonic(), jwks)
+    return jwks
+
+
+def _select_jwk(jwks: dict, kid: Optional[str], alg: str) -> dict:
+    """Pick a JWK from ``jwks`` matching ``kid`` (or the only key if none)."""
+    keys = jwks.get("keys", [])
+    if kid is None:
+        if len(keys) == 1:
+            return keys[0]
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="ID token header missing 'kid' and JWKS has multiple keys",
+        )
+
+    for key in keys:
+        if key.get("kid") == kid:
+            return key
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=f"No JWKS key matches ID token kid {kid!r}",
+    )
+
+
+def _validate_id_token(
+    id_token: str,
+    issuer: str,
+    client_id: str,
+    jwks_uri_override: Optional[str] = None,
+) -> dict:
+    """Verify the OIDC ID token signature and standard claims.
+
+    The signature is verified against the provider's JWKS (resolved via the
+    OIDC Discovery document's ``jwks_uri`` and cached in-process), and the
+    ``alg``, ``iss``, ``aud``, ``exp``, and ``nbf`` claims are validated by
+    :func:`jose.jwt.decode`. Tokens with ``alg == "none"`` or any algorithm
+    outside :data:`_ALLOWED_ID_TOKEN_ALGS` are rejected before key lookup.
+
+    ``jwks_uri_override`` lets callers (notably tests) point verification at
+    a local JWKS without changing the configured issuer.
+
+    Returns the decoded payload on success. Raises ``HTTPException`` on any
+    failure (malformed token, missing/unsupported ``kid``, signature mismatch,
+    claim mismatch, expired token, etc.).
+    """
+    # 1. Inspect the header so we know which algorithm the token claims and
+    #    which key (by kid) to look up in the JWKS.
+    try:
+        header = jwt.get_unverified_header(id_token)
     except (JWTError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid ID token header: {exc}",
+        ) from exc
+
+    alg = header.get("alg")
+    if not alg or (isinstance(alg, str) and alg.lower() == "none"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="ID token is unsigned (alg=none); refusing to trust claims",
+        )
+    if alg not in _ALLOWED_ID_TOKEN_ALGS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Unexpected ID token algorithm {alg!r}; refusing to verify",
+        )
+
+    kid = header.get("kid")
+
+    # 2. Resolve the provider's JWKS and pick the matching key.
+    jwks = _fetch_jwks(issuer, jwks_uri_override=jwks_uri_override)
+    jwk_dict = _select_jwk(jwks, kid, alg)
+    try:
+        key = jwk.construct(jwk_dict, algorithm=alg)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Could not construct JWK for kid {kid!r}: {exc}",
+        ) from exc
+
+    # python-jose JWK objects expose the PEM-encoded public key via
+    # ``to_pem()`` (PEM bytes, ``str`` for some backends). On the
+    # cryptography backend, ``public_key`` is a bound method that returns
+    # the cryptography ``RSAPublicKey`` itself, which is not what
+    # ``jwt.decode`` wants — it wants PEM. So use ``to_pem()`` directly.
+    try:
+        public_key_pem = key.to_pem()  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Could not extract public key from JWK: {exc}",
+        ) from exc
+    if isinstance(public_key_pem, str):
+        public_key_pem = public_key_pem.encode("utf-8")
+
+    # 3. Verify signature + standard claims (iss, aud, exp, nbf) in one shot.
+    #    ``jose.jwt.decode`` raises ``JWTError`` on any mismatch. We
+    #    distinguish the kind of failure so the caller sees the right HTTP
+    #    status: signature / key failures are authentication failures
+    #    (401), while structural claim mismatches are bad-input failures
+    #    (400) consistent with the pre-verification behavior.
+    #
+    #    Note: python-jose's ``verify_aud`` only checks the value when an
+    #    ``aud`` claim exists; it does NOT reject a token that omits ``aud``
+    #    entirely when ``audience`` is supplied. We require ``aud``
+    #    presence explicitly via ``require_aud`` so a token that simply
+    #    doesn't carry an audience is rejected as malformed.
+    try:
+        payload = jwt.decode(
+            id_token,
+            public_key_pem,
+            algorithms=list(_ALLOWED_ID_TOKEN_ALGS),
+            audience=client_id,
+            issuer=issuer,
+            options={
+                "verify_at_hash": False,
+                "verify_aud": True,
+                "require_aud": True,
+            },
+        )
+    except JWSError as exc:
+        # Signature did not match the JWKS key (or the key shape was
+        # wrong for the algorithm). Authentication failure.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"ID token signature invalid: {exc}",
+        ) from exc
+    except JWTClaimsError as exc:
+        # Signature is valid but ``iss``/``aud``/``exp``/``nbf`` did not
+        # match — preserve the prior 400 + descriptive detail so callers
+        # and tests can still inspect the cause.
+        message = str(exc).lower()
+        if "issuer" in message:
+            detail = f"ID token issuer mismatch: {exc}"
+        elif "audience" in message:
+            detail = f"ID token audience mismatch: {exc}"
+        elif "expire" in message or "exp" in message:
+            detail = f"ID token expired: {exc}"
+        elif "not yet" in message or "nbf" in message or "immature" in message:
+            detail = f"ID token not yet valid: {exc}"
+        elif "aud" in message:
+            detail = f"ID token missing 'aud' claim: {exc}"
+        else:
+            detail = f"ID token claims invalid: {exc}"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail,
+        ) from exc
+    except JWTError as exc:
+        # Token couldn't even be parsed by jose (malformed segments,
+        # missing required claims, etc.). Bad-input failure.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid ID token: {exc}",
-        )
-
-    token_issuer = payload.get("iss")
-    if token_issuer != issuer:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"ID token issuer mismatch: expected {issuer!r}, got {token_issuer!r}",
-        )
-
-    aud = payload.get("aud")
-    if aud is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID token missing 'aud' claim",
-        )
-    # ``aud`` can be a string or a list of strings per OIDC spec.
-    if isinstance(aud, str):
-        aud_list = [aud]
-    else:
-        aud_list = aud
-    if client_id not in aud_list:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"ID token audience mismatch: expected {client_id!r}, got {aud_list}",
-        )
+        ) from exc
 
     return payload
 
