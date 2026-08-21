@@ -144,8 +144,10 @@ def _validate_id_token(
     try:
         header = jwt.get_unverified_header(id_token)
     except (JWTError, ValueError) as exc:
+        # Header parse failure: treat as an authentication failure so we
+        # don't leak structural information about the rejected token.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid ID token header: {exc}",
         ) from exc
 
@@ -190,11 +192,11 @@ def _validate_id_token(
         public_key_pem = public_key_pem.encode("utf-8")
 
     # 3. Verify signature + standard claims (iss, aud, exp, nbf) in one shot.
-    #    ``jose.jwt.decode`` raises ``JWTError`` on any mismatch. We
-    #    distinguish the kind of failure so the caller sees the right HTTP
-    #    status: signature / key failures are authentication failures
-    #    (401), while structural claim mismatches are bad-input failures
-    #    (400) consistent with the pre-verification behavior.
+    #    ``jose.jwt.decode`` raises ``JWTError`` on any mismatch. Every
+    #    verification failure — signature, key, claim, or structural —
+    #    is reported as an authentication failure (401). Returning 400
+    #    for some failure modes would leak which check tripped to an
+    #    attacker probing the SSO callback, so we collapse them.
     #
     #    Note: python-jose's ``verify_aud`` only checks the value when an
     #    ``aud`` claim exists; it does NOT reject a token that omits ``aud``
@@ -223,8 +225,11 @@ def _validate_id_token(
         ) from exc
     except JWTClaimsError as exc:
         # Signature is valid but ``iss``/``aud``/``exp``/``nbf`` did not
-        # match — preserve the prior 400 + descriptive detail so callers
-        # and tests can still inspect the cause.
+        # match. We surface these as 401 (same as signature failures) so
+        # callers cannot distinguish *which* check tripped — an attacker
+        # probing the endpoint gets no oracle about whether the token
+        # parsed, had a valid signature, or carried acceptable claims.
+        # Detailed reasons are still preserved in ``detail`` for logs.
         message = str(exc).lower()
         if "issuer" in message:
             detail = f"ID token issuer mismatch: {exc}"
@@ -239,14 +244,16 @@ def _validate_id_token(
         else:
             detail = f"ID token claims invalid: {exc}"
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,
         ) from exc
     except JWTError as exc:
         # Token couldn't even be parsed by jose (malformed segments,
-        # missing required claims, etc.). Bad-input failure.
+        # missing required claims, etc.). Report as an authentication
+        # failure rather than a bad-request 400 so we don't disclose
+        # structural information about the rejected token.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid ID token: {exc}",
         ) from exc
 

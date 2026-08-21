@@ -944,7 +944,7 @@ class TestIdTokenValidation:
                 "my-client-id",
                 jwks_uri_override=jwks_uri,
             )
-        assert exc_info.value.status_code == 400
+        assert exc_info.value.status_code == 401
         assert "issuer mismatch" in str(exc_info.value.detail).lower()
 
     def test_rejects_wrong_audience(self, rsa_jwks):
@@ -966,7 +966,7 @@ class TestIdTokenValidation:
                 "my-client-id",
                 jwks_uri_override=jwks_uri,
             )
-        assert exc_info.value.status_code == 400
+        assert exc_info.value.status_code == 401
         assert "audience mismatch" in str(exc_info.value.detail).lower()
 
     def test_rejects_missing_aud(self, rsa_jwks):
@@ -996,7 +996,7 @@ class TestIdTokenValidation:
                 "my-client-id",
                 jwks_uri_override=jwks_uri,
             )
-        assert exc_info.value.status_code == 400
+        assert exc_info.value.status_code == 401
         assert "aud" in str(exc_info.value.detail).lower()
 
     def test_accepts_aud_as_list(self, rsa_jwks):
@@ -1024,8 +1024,10 @@ class TestIdTokenValidation:
         from fastapi import HTTPException
 
         # rsa_jwks patches the module's JWKS fetcher so the validator can
-        # reach the key-lookup / decode stage, but the malformed token
-        # should fail at the header-parse stage first (400).
+        # reach the key-lookup / decode stage. The malformed token
+        # fails to parse; per the security-hardening in #351 we report
+        # every verification failure as 401 so we don't leak which
+        # check tripped.
         _private_pem, _jwks, _jwks_uri = rsa_jwks
         with pytest.raises(HTTPException) as exc_info:
             _validate_id_token(
@@ -1034,4 +1036,4 @@ class TestIdTokenValidation:
                 "my-client-id",
                 jwks_uri_override="https://example.com/jwks.json",
             )
-        assert exc_info.value.status_code == 400
+        assert exc_info.value.status_code == 401
