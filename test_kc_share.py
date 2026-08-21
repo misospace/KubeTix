@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -269,6 +270,34 @@ class TestExpiry(unittest.TestCase):
 
         grants = list_grants()
         self.assertEqual(len(grants), 0)
+
+
+class TestMissingCryptography(unittest.TestCase):
+    """Test that a missing cryptography dependency fails loudly without pip install"""
+
+    def test_missing_cryptography_fails_loudly(self):
+        """kc-share.py must exit 1 with install instructions, never shell out to pip"""
+        # Shadow the real cryptography package with one that raises ImportError
+        shadow_dir = Path(tempfile.mkdtemp())
+        try:
+            (shadow_dir / "cryptography").mkdir()
+            (shadow_dir / "cryptography" / "__init__.py").write_text(
+                'raise ImportError("blocked for test")\n'
+            )
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(shadow_dir) + os.pathsep + env.get("PYTHONPATH", "")
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).parent / "kc-share.py"), "--help"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("pip install -r requirements.txt", result.stderr)
+            self.assertNotIn("Installing cryptography", result.stderr)
+        finally:
+            shutil.rmtree(shadow_dir)
 
 
 if __name__ == "__main__":
