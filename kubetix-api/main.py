@@ -14,7 +14,7 @@ All business logic lives in sub-packages:
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import Any, Dict, List
 
 import secrets
 
@@ -200,7 +200,7 @@ app.add_middleware(
 # Re-export shared dependencies for route handlers and tests
 # ---------------------------------------------------------------------------
 
-from kubetix_api.database import get_db  # noqa: E402
+from kubetix_api.database import SessionLocal, get_db  # noqa: E402
 from kubetix_api.auth import (  # noqa: E402
     get_current_user,
     get_password_hash,
@@ -365,6 +365,7 @@ from kubetix_api.grants import (  # noqa: E402
     get_grant,
     revoke_grant,
     get_audit_log,
+    update_grant,
 )
 
 
@@ -409,6 +410,26 @@ async def revoke_grant_endpoint(
     db=Depends(get_db),
 ):
     revoke_grant(grant_id, current_user, db)
+
+
+@v1_router.put("/grants/{grant_id}", response_model=GrantResponse)
+def put_grant(
+    grant_id: str,
+    payload: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+):
+    """Upsert/update a grant from the CLI ``sync`` bridge.
+
+    The CLI emits a full record (id, created_at, expires_at, revoked,
+    metadata, encrypted_kubeconfig, ...).  We accept the raw JSON body so
+    the bridge can evolve without 422s, and dispatch to ``update_grant``
+    which authorises on ownership / admin role and writes the row.
+    """
+    db = SessionLocal()
+    try:
+        return update_grant(grant_id, payload, current_user, db)
+    finally:
+        db.close()
 
 
 @v1_router.get("/audit", response_model=List[dict])
