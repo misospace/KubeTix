@@ -793,90 +793,245 @@ class TestEmailVerifiedCheck:
             oidc_mod.SSO_REQUIRE_EMAIL_VERIFIED = original
 
 
+# ---------------------------------------------------------------------------
+# Helpers for testing the JWKS-backed signature-verification path.
+#
+# Issue #351 added real signature verification to ``_validate_id_token``.
+# These tests previously signed tokens with HS256 ("secret") and never
+# asserted signature validity — they were effectively testing the
+# unverified-claim path. The class below now generates an RSA keypair per
+# test, signs tokens with it, and injects a corresponding JWKS via the
+# ``jwks_uri_override`` parameter so the validator can verify the
+# signature. The claim-validation semantics (iss / aud) being exercised
+# here are unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _b64url_uint(n: int) -> str:
+    import base64
+
+    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+
+def _make_rsa_keypair_and_jwks(kid: str = "test-kid"):
+    """Return ``(private_pem, jwks_dict, jwks_uri)`` for a fresh RSA key."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    numbers = private_key.public_key().public_numbers()
+    jwks = {
+        "keys": [
+            {
+                "kty": "RSA",
+                "use": "sig",
+                "alg": "RS256",
+                "kid": kid,
+                "n": _b64url_uint(numbers.n),
+                "e": _b64url_uint(numbers.e),
+            }
+        ]
+    }
+    return (
+        private_pem,
+        jwks,
+        f"https://idp.example.com/.well-known/test-{kid}-jwks.json",
+    )
+
+
+def _make_signed_jwt(
+    private_pem,
+    *,
+    claims_overrides: dict,
+    kid: str = "test-kid",
+):
+    """Encode an OIDC ID token signed with ``private_pem`` (RS256)."""
+    import time as _time
+
+    from jose import jwt as _jwt
+
+    now = int(_time.time())
+    base_claims = {
+        "iss": "https://authentik.example.com",
+        "aud": "kubetix-test",
+        "sub": "user-1",
+        "email": "[email protected]",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    base_claims.update(claims_overrides)
+    return _jwt.encode(
+        base_claims,
+        private_pem.decode("utf-8") if isinstance(private_pem, bytes) else private_pem,
+        algorithm="RS256",
+        headers={"kid": kid},
+    )
+
+
+@pytest.fixture
+def rsa_jwks(monkeypatch):
+    """Generate an RSA keypair and stub the OIDC module's JWKS fetcher.
+
+    Yields ``(private_pem, jwks, jwks_uri)`` so individual tests can sign
+    tokens and pass ``jwks_uri`` to ``_validate_id_token`` via the
+    ``jwks_uri_override`` parameter (issue #351 added this knob so the
+    signature path is testable without a real IdP).
+    """
+    from kubetix_api import oidc as _oidc
+
+    private_pem, jwks, jwks_uri = _make_rsa_keypair_and_jwks()
+
+    def _fake_fetch_jwks(issuer, jwks_uri_override=None):
+        return jwks
+
+    monkeypatch.setattr(_oidc, "_fetch_jwks", _fake_fetch_jwks)
+    return private_pem, jwks, jwks_uri
+
+
 class TestIdTokenValidation:
-    """Tests for ``_validate_id_token`` — iss / aud claim checks."""
+    """Tests for ``_validate_id_token`` — iss / aud claim checks.
 
-    def test_accepts_valid_token(self):
+    After issue #351, ``_validate_id_token`` performs real JWKS-backed
+    signature verification. These tests therefore use the ``rsa_jwks``
+    fixture, which generates a fresh RSA keypair per test and stubs the
+    module's ``_fetch_jwks`` so the JWKS is local and resolvable. The
+    ``jwks_uri_override`` parameter is the test seam added by #351.
+    """
+
+    def test_accepts_valid_token(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
-        from jose import jwt
 
-        payload = {
-            "iss": "https://accounts.google.com",
-            "aud": "my-client-id",
-            "sub": "123456789",
-            "email": "user@example.com",
-        }
-        token = jwt.encode(payload, "secret", algorithm="HS256")
+        private_pem, _jwks, jwks_uri = rsa_jwks
+        token = _make_signed_jwt(
+            private_pem,
+            claims_overrides={
+                "iss": "https://accounts.google.com",
+                "aud": "my-client-id",
+                "sub": "123456789",
+                "email": "user@example.com",
+            },
+        )
         result = _validate_id_token(
-            token, "https://accounts.google.com", "my-client-id"
+            token,
+            "https://accounts.google.com",
+            "my-client-id",
+            jwks_uri_override=jwks_uri,
         )
         assert result["sub"] == "123456789"
 
-    def test_rejects_wrong_issuer(self):
+    def test_rejects_wrong_issuer(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
-        from jose import jwt
         from fastapi import HTTPException
 
-        payload = {
-            "iss": "https://evil.example.com",
-            "aud": "my-client-id",
-        }
-        token = jwt.encode(payload, "secret", algorithm="HS256")
+        private_pem, _jwks, jwks_uri = rsa_jwks
+        token = _make_signed_jwt(
+            private_pem,
+            claims_overrides={
+                "iss": "https://evil.example.com",
+                "aud": "my-client-id",
+            },
+        )
         with pytest.raises(HTTPException) as exc_info:
-            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+            _validate_id_token(
+                token,
+                "https://accounts.google.com",
+                "my-client-id",
+                jwks_uri_override=jwks_uri,
+            )
         assert exc_info.value.status_code == 400
         assert "issuer mismatch" in str(exc_info.value.detail).lower()
 
-    def test_rejects_wrong_audience(self):
+    def test_rejects_wrong_audience(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
-        from jose import jwt
         from fastapi import HTTPException
 
-        payload = {
-            "iss": "https://accounts.google.com",
-            "aud": "other-client-id",
-        }
-        token = jwt.encode(payload, "secret", algorithm="HS256")
+        private_pem, _jwks, jwks_uri = rsa_jwks
+        token = _make_signed_jwt(
+            private_pem,
+            claims_overrides={
+                "iss": "https://accounts.google.com",
+                "aud": "other-client-id",
+            },
+        )
         with pytest.raises(HTTPException) as exc_info:
-            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+            _validate_id_token(
+                token,
+                "https://accounts.google.com",
+                "my-client-id",
+                jwks_uri_override=jwks_uri,
+            )
         assert exc_info.value.status_code == 400
         assert "audience mismatch" in str(exc_info.value.detail).lower()
 
-    def test_rejects_missing_aud(self):
+    def test_rejects_missing_aud(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
-        from jose import jwt
+        from jose import jwt as _jwt
         from fastapi import HTTPException
 
-        payload = {
-            "iss": "https://accounts.google.com",
-        }
-        token = jwt.encode(payload, "secret", algorithm="HS256")
+        import time as _time
+
+        private_pem, _jwks, jwks_uri = rsa_jwks
+        now = int(_time.time())
+        token = _jwt.encode(
+            {
+                "iss": "https://accounts.google.com",
+                "sub": "123456789",
+                "iat": now,
+                "exp": now + 3600,
+            },
+            private_pem.decode("utf-8"),
+            algorithm="RS256",
+            headers={"kid": "test-kid"},
+        )
         with pytest.raises(HTTPException) as exc_info:
-            _validate_id_token(token, "https://accounts.google.com", "my-client-id")
+            _validate_id_token(
+                token,
+                "https://accounts.google.com",
+                "my-client-id",
+                jwks_uri_override=jwks_uri,
+            )
         assert exc_info.value.status_code == 400
         assert "aud" in str(exc_info.value.detail).lower()
 
-    def test_accepts_aud_as_list(self):
+    def test_accepts_aud_as_list(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
-        from jose import jwt
 
-        payload = {
-            "iss": "https://accounts.google.com",
-            "aud": ["other-client-id", "my-client-id"],
-            "sub": "123456789",
-        }
-        token = jwt.encode(payload, "secret", algorithm="HS256")
+        private_pem, _jwks, jwks_uri = rsa_jwks
+        token = _make_signed_jwt(
+            private_pem,
+            claims_overrides={
+                "iss": "https://accounts.google.com",
+                "aud": ["other-client-id", "my-client-id"],
+                "sub": "123456789",
+            },
+        )
         result = _validate_id_token(
-            token, "https://accounts.google.com", "my-client-id"
+            token,
+            "https://accounts.google.com",
+            "my-client-id",
+            jwks_uri_override=jwks_uri,
         )
         assert result["sub"] == "123456789"
 
-    def test_rejects_malformed_token(self):
+    def test_rejects_malformed_token(self, rsa_jwks):
         from kubetix_api.oidc import _validate_id_token
         from fastapi import HTTPException
 
+        # rsa_jwks patches the module's JWKS fetcher so the validator can
+        # reach the key-lookup / decode stage, but the malformed token
+        # should fail at the header-parse stage first (400).
+        _private_pem, _jwks, _jwks_uri = rsa_jwks
         with pytest.raises(HTTPException) as exc_info:
             _validate_id_token(
-                "not.a.token", "https://accounts.google.com", "my-client-id"
+                "not.a.token",
+                "https://accounts.google.com",
+                "my-client-id",
+                jwks_uri_override="https://example.com/jwks.json",
             )
         assert exc_info.value.status_code == 400
