@@ -32,3 +32,8 @@ slowapi==0.1.10
 # wheel for the newest CPython.
 psycopg2-binary>=2.9.10
 psycopg[binary]>=3.2.0,<4.0.0
+# Alembic drives the schema-migration framework that replaced
+# ``Base.metadata.create_all`` + the one-off ``migrate_add_fk.py`` script
+# (issue #352). Pinned to stay within a SQLAlchemy 2.x-compatible 1.x
+# release line.
+alembic>=1.13.0,<2.0.0

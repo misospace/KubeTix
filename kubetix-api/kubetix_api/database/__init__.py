@@ -120,10 +120,40 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    """Create all tables defined in kubetix_api.models."""
+    """Apply Alembic migrations to bring the database to ``HEAD``.
+
+    Replaces the previous ``Base.metadata.create_all`` flow. ``create_all``
+    only creates missing tables and never alters them, so it cannot evolve an
+    existing schema. With Alembic, every schema change is a versioned
+    revision that supports upgrade *and* rollback.
+
+    The Alembic invocation drives off this module's own path: the
+    ``alembic.ini`` and ``migrations/`` directory live alongside
+    ``kubetix_api/`` in the source tree. The path is derived from ``__file__``
+    rather than user input, so there is no path-traversal surface here.
+    """
+    import os
+    import subprocess
+    import sys
+
+    # ``os.path.dirname(__file__)`` is the kubetix_api package directory; the
+    # alembic.ini and migrations/ directory live one level up (in kubetix-api/).
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    config_path = os.path.join(repo_root, "alembic.ini")
+
+    # Touched so even if ``init_db`` is the only database call the side
+    # effect import is intentional rather than dead code.
     from kubetix_api.models import Base  # noqa: F401
 
-    Base.metadata.create_all(bind=get_engine())
+    del Base
+
+    # Use ``python -m alembic`` rather than a bare ``alembic`` CLI so we don't
+    # depend on a PATH lookup that may not exist inside the API container.
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", config_path, "upgrade", "head"],
+        cwd=repo_root,
+        check=True,
+    )
 
 
 # ---------------------------------------------------------------------------
