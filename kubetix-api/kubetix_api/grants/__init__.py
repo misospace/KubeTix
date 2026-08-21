@@ -216,6 +216,92 @@ def revoke_grant(grant_id: str, current_user: User, db) -> None:
     db.commit()
 
 
+def update_grant(
+    grant_id: str,
+    payload: dict,
+    current_user: User,
+    db,
+) -> GrantResponse:
+    """Upsert/update a grant from the CLI sync bridge.
+
+    Accepts the full payload emitted by ``kc-share.sync_to_api`` (which
+    contains fields such as ``id``, ``created_at``, ``expires_at``,
+    ``revoked``, ``metadata``, ``encrypted_kubeconfig`` in addition to the
+    canonical ``GrantCreate`` fields).  Authorisation matches
+    ``revoke_grant``: the grant owner or an admin may write.  Unknown
+    fields are ignored so that the bridge can evolve without 422s.
+
+    If the grant does not yet exist (e.g. the CLI created it locally after
+    the API restart), a new row is inserted with the supplied id, owning
+    user, timestamps, and (re-)encrypted kubeconfig.
+    """
+    grant = db.query(Grant).filter(Grant.id == grant_id).first()
+
+    if grant is not None:
+        if grant.user_id != current_user.id and not current_user.is_admin:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to update this grant"
+            )
+    else:
+        # Upsert path: CLI is the source of truth and the API row was lost.
+        # Owner is taken from the payload so existing CLI records import
+        # cleanly; admins can adopt orphans via an explicit user_id field.
+        new_user_id = current_user.id
+        if current_user.is_admin and payload.get("user_id"):
+            new_user_id = payload["user_id"]
+        grant = Grant(
+            id=grant_id,
+            user_id=new_user_id,
+            cluster_name=payload.get("cluster_name", "unknown"),
+            namespace=payload.get("namespace"),
+            role=payload.get("role", "view"),
+            encrypted_kubeconfig=payload.get("encrypted_kubeconfig") or "",
+        )
+
+    # Apply writable fields if present in the payload.
+    if "cluster_name" in payload and payload["cluster_name"]:
+        grant.cluster_name = payload["cluster_name"]
+    if "namespace" in payload:
+        grant.namespace = payload["namespace"]
+    if "role" in payload and payload["role"]:
+        grant.role = payload["role"]
+    if "revoked" in payload:
+        grant.revoked = bool(payload["revoked"])
+    if "encrypted_kubeconfig" in payload and payload["encrypted_kubeconfig"]:
+        grant.encrypted_kubeconfig = payload["encrypted_kubeconfig"]
+
+    expires_at_raw = payload.get("expires_at")
+    if expires_at_raw:
+        try:
+            parsed = datetime.fromisoformat(str(expires_at_raw).replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            grant.expires_at = parsed
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid expires_at value: {expires_at_raw!r}",
+            )
+
+    if not grant.expires_at:
+        grant.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    if grant not in db.new:
+        db.add(grant)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        grant_id=grant.id,
+        action="synced",
+        details=f"Synced grant for {grant.cluster_name} from CLI",
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(grant)
+
+    return GrantResponse.model_validate(grant)
+
+
 def get_audit_log(db, current_user: User) -> List[dict]:
     """Get audit log entries (admins see all, users see their own)."""
     if current_user.is_admin:
