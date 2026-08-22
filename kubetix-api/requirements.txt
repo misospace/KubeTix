@@ -11,7 +11,7 @@
 # include the new exact version. The reverse direction does NOT need to be
 # mirrored: this file is the single source of truth for the service.
 fastapi==0.141.1
-uvicorn[standard]==0.52.1
+uvicorn[standard]==0.52.4
 sqlalchemy==2.0.52
 python-jose[cryptography]==3.5.0
 bcrypt>=5.0.0,<5.1.0  # pinned to 4.x; bcrypt 5.x breaks passlib's CryptContext
