@@ -3,9 +3,11 @@ FROM python:3.14-slim
 # Set working directory
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies (CLI-only set: kc-share.py imports stdlib plus
+# cryptography.fernet, so the image must not pull in the kubetix-api
+# runtime — see requirements-cli.txt)
+COPY requirements-cli.txt .
+RUN pip install --no-cache-dir -r requirements-cli.txt
 
 # Copy application
 COPY kc-share.py .

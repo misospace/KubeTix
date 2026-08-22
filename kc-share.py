@@ -20,7 +20,7 @@ except ImportError:
     sys.stderr.write(
         "Error: the 'cryptography' package is required but not installed.\n"
         "Install dependencies with:\n"
-        "    pip install -r requirements.txt\n"
+        "    pip install -r requirements-cli.txt\n"
         "or use the CLI container image, which ships with all dependencies.\n"
     )
     sys.exit(1)
