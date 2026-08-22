@@ -23,10 +23,10 @@ Share secure, time-limited Kubernetes access with your team. No more permanent a
 ## 📦 Installation
 
 ```bash
-# Clone and install
+# Clone and install (CLI only needs cryptography)
 git clone https://github.com/misospace/KubeTix.git
 cd KubeTix
-pip install -r requirements.txt
+pip install -r requirements-cli.txt
 ```
 
 ## 🎯 Quick Start

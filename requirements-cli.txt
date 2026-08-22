@@ -1,0 +1,8 @@
+# Dependencies for the root `kc-share.py` CLI image (built by the root
+# Dockerfile). The CLI imports only stdlib plus `cryptography.fernet`, so
+# this file intentionally contains nothing else.
+#
+# Do NOT add the kubetix-api runtime (fastapi, sqlalchemy, pydantic, ...)
+# here: the CLI image must stay slim and decoupled from API dependency
+# bumps. The repo-root test runner uses `requirements.txt` instead.
+cryptography>=50.0.0,<50.1.0

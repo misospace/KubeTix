@@ -294,7 +294,7 @@ class TestMissingCryptography(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(result.returncode, 1)
-            self.assertIn("pip install -r requirements.txt", result.stderr)
+            self.assertIn("pip install -r requirements-cli.txt", result.stderr)
             self.assertNotIn("Installing cryptography", result.stderr)
         finally:
             shutil.rmtree(shadow_dir)

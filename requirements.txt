@@ -1,18 +1,22 @@
-# This file is used by the root Dockerfile for the `kc-share.py` CLI image
-# and by developers running the kubetix-api test suite / one-off scripts
-# from the repo root. The overlap with `kubetix-api/requirements.txt`
-# (fastapi, sqlalchemy, pydantic, python-jose, cryptography, bcrypt, httpx,
-# slowapi) exists so the test suite can be exercised without bootstrapping
-# the kubetix-api image first.
+# This file is the dependency set for the repo-root test runner
+# (run_tests.sh, the CI test jobs, and one-off scripts run from the
+# repo root). It is NOT used by the CLI image: the root Dockerfile
+# installs `requirements-cli.txt` instead, which contains only
+# `cryptography`.
+#
+# The overlap with `kubetix-api/requirements.txt` (fastapi, sqlalchemy,
+# pydantic, python-jose, cryptography, bcrypt, httpx, slowapi) exists so
+# the test suite can be exercised without bootstrapping the kubetix-api
+# image first.
 #
 # IMPORTANT: `kubetix-api/requirements.txt` is the authoritative source of
 # truth for the kubetix-api service. That file is exact-pinned and is the
 # one `kubetix-api/Dockerfile` installs in production. The API service
 # always wins over this file: when bumping a shared dependency here, also
 # bump it in `kubetix-api/requirements.txt`. The reverse direction does
-# not need to be mirrored; this file is kept loose so the CLI image and
-# the test runner can install against a moving floor of compatible
-# versions without pinning the whole world.
+# not need to be mirrored; this file is kept loose so the test runner can
+# install against a moving floor of compatible versions without pinning
+# the whole world.
 cryptography>=50.0.0,<50.1.0
 slowapi>=0.1.9,<0.2.0
 
@@ -29,4 +33,3 @@ fastapi>=0.104.0,<1.0.0
 sqlalchemy>=2.0.0,<3.0.0
 pydantic>=2.0.0,<3.0.0
 python-jose[cryptography]>=3.3.0,<4.0.0
-
