@@ -51,6 +51,7 @@ Thumbs.db
 # Database files
 *.db
 kubetix.db
+kubetix-api/*.sqlite
 node_modules/
 
 # Next.js build output
