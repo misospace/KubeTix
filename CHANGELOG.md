@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/misospace/KubeTix/compare/v0.2.0...v0.3.0) (2026-08-23)
+
+
+### Features
+
+* **deps:** update dependency lucide-react (1.32.0 → 1.33.0) ([#362](https://github.com/misospace/KubeTix/issues/362)) ([fdc5b9d](https://github.com/misospace/KubeTix/commit/fdc5b9df9b45a291a7ef2d6952127226de46d7f1))
+
+
+### Bug Fixes
+
+* **api:** add PUT /api/v1/grants/{grant_id} for CLI sync bridge ([#369](https://github.com/misospace/KubeTix/issues/369)) ([873f6ed](https://github.com/misospace/KubeTix/commit/873f6ed6288d35fe22c56ec08fe88a3c537736eb)), closes [#356](https://github.com/misospace/KubeTix/issues/356)
+* **cli:** fail loudly instead of pip-installing cryptography at import ([#372](https://github.com/misospace/KubeTix/issues/372)) ([52693c6](https://github.com/misospace/KubeTix/commit/52693c6eed560121cc846169f85b31d57b17d7bb)), closes [#357](https://github.com/misospace/KubeTix/issues/357)
+* **deps:** update dependency @testing-library/user-event (14.6.5 → 14.6.6) ([#374](https://github.com/misospace/KubeTix/issues/374)) ([68f5b72](https://github.com/misospace/KubeTix/commit/68f5b7262bb72f8870fe5bb2a547a67d63040b25))
+* **deps:** update dependency next (16.3.1 → 16.3.2) ([#371](https://github.com/misospace/KubeTix/issues/371)) ([ec816bb](https://github.com/misospace/KubeTix/commit/ec816bbe71c581a870209eb778f8c3738379de20))
+* **helm:** avoid duplicate kubeconfig encryption env ([#370](https://github.com/misospace/KubeTix/issues/370)) ([1f065be](https://github.com/misospace/KubeTix/commit/1f065bec43401343c451b4b3a773b908c037b537))
+* **migrations:** capture full schema in initial Alembic revision ([#367](https://github.com/misospace/KubeTix/issues/367)) ([49fdbe8](https://github.com/misospace/KubeTix/commit/49fdbe878f36ffb526c7bb4e429b1dbc8c3e1d98)), closes [#352](https://github.com/misospace/KubeTix/issues/352)
+* **oidc:** verify ID-token signature against provider JWKS before trusting claims ([#368](https://github.com/misospace/KubeTix/issues/368)) ([e19a935](https://github.com/misospace/KubeTix/commit/e19a935dcefd20b2b54212111982e396329dc275)), closes [#351](https://github.com/misospace/KubeTix/issues/351)
+
+
+### Chores
+
+* **api:** remove tracked 0-byte test_default.sqlite and ignore *.sqlite ([#375](https://github.com/misospace/KubeTix/issues/375)) ([0ac14c7](https://github.com/misospace/KubeTix/commit/0ac14c7cdfd2ea906c23ed4abc5a14020f7e2274)), closes [#355](https://github.com/misospace/KubeTix/issues/355)
+* **cli:** slim root CLI image to install only cryptography ([#376](https://github.com/misospace/KubeTix/issues/376)) ([9f4cf09](https://github.com/misospace/KubeTix/commit/9f4cf09b811515c278ce0a5998ec608ee82c5c84)), closes [#358](https://github.com/misospace/KubeTix/issues/358)
+
 ## [0.2.0](https://github.com/misospace/KubeTix/compare/v0.1.0...v0.2.0) (2026-08-18)
 
 
