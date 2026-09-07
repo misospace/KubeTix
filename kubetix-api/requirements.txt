@@ -11,13 +11,13 @@
 # include the new exact version. The reverse direction does NOT need to be
 # mirrored: this file is the single source of truth for the service.
 fastapi==0.141.1
-uvicorn[standard]==0.52.1
+uvicorn[standard]==0.52.4
 sqlalchemy==2.0.52
 python-jose[cryptography]==3.5.0
 bcrypt>=5.0.0,<5.1.0  # pinned to 4.x; bcrypt 5.x breaks passlib's CryptContext
 python-multipart==0.0.32
-pydantic==2.13.4
-cryptography==50.0.0
+pydantic==2.13.5
+cryptography==50.0.1
 httpx==0.28.1
 slowapi==0.1.10
 # PostgreSQL drivers (issue #310). ``psycopg2-binary`` is the default
