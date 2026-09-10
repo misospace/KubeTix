@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.3.0](https://github.com/misospace/KubeTix/compare/v0.2.0...v0.3.0) (2026-09-10)
+
+
+### Features
+
+* **container:** update image postgresql (18.8.12 → 18.11.0) ([#388](https://github.com/misospace/KubeTix/issues/388)) ([0f0a33d](https://github.com/misospace/KubeTix/commit/0f0a33d45d4c4316ccfae1001546edf6018cf3ba))
+* **deps:** update dependency axios (1.19.0 → 1.20.0) ([#389](https://github.com/misospace/KubeTix/issues/389)) ([2211376](https://github.com/misospace/KubeTix/commit/22113760ed53fde6acc709b74d1b23b2f541976a))
+* **deps:** update dependency lucide-react (1.32.0 → 1.33.0) ([#362](https://github.com/misospace/KubeTix/issues/362)) ([fdc5b9d](https://github.com/misospace/KubeTix/commit/fdc5b9df9b45a291a7ef2d6952127226de46d7f1))
+* **deps:** update dependency lucide-react (1.33.0 → 1.44.0) ([#390](https://github.com/misospace/KubeTix/issues/390)) ([2deee42](https://github.com/misospace/KubeTix/commit/2deee423c05edf9ec1c5c45b7cb941ed504c92ef))
+* **deps:** update dependency vitest (4.1.11 → 5.0.0) ([#393](https://github.com/misospace/KubeTix/issues/393)) ([a54b74d](https://github.com/misospace/KubeTix/commit/a54b74d8f56f97ceadfc37f852c571f45061bc2c))
+* **deps:** update react monorepo (19.2.18 → 19.3.0) ([#391](https://github.com/misospace/KubeTix/issues/391)) ([a418f51](https://github.com/misospace/KubeTix/commit/a418f513697d65d0a531ce7a6d3030738dae4ae6))
+
+
+### Bug Fixes
+
+* **api:** add PUT /api/v1/grants/{grant_id} for CLI sync bridge ([#369](https://github.com/misospace/KubeTix/issues/369)) ([873f6ed](https://github.com/misospace/KubeTix/commit/873f6ed6288d35fe22c56ec08fe88a3c537736eb)), closes [#356](https://github.com/misospace/KubeTix/issues/356)
+* **cli:** fail loudly instead of pip-installing cryptography at import ([#372](https://github.com/misospace/KubeTix/issues/372)) ([52693c6](https://github.com/misospace/KubeTix/commit/52693c6eed560121cc846169f85b31d57b17d7bb)), closes [#357](https://github.com/misospace/KubeTix/issues/357)
+* **deps:** update dependency @testing-library/user-event (14.6.5 → 14.6.6) ([#374](https://github.com/misospace/KubeTix/issues/374)) ([68f5b72](https://github.com/misospace/KubeTix/commit/68f5b7262bb72f8870fe5bb2a547a67d63040b25))
+* **deps:** update dependency @types/node (24.13.3 → 24.13.4) ([#386](https://github.com/misospace/KubeTix/issues/386)) ([575b205](https://github.com/misospace/KubeTix/commit/575b20537101f7b4210f69d39cafe3d39c613c5b))
+* **deps:** update dependency @types/react-dom (19.2.4 → 19.2.7) ([#378](https://github.com/misospace/KubeTix/issues/378)) ([e08a131](https://github.com/misospace/KubeTix/commit/e08a1316b2e0ebdbaf4466d2187af874fecb0e5c))
+* **deps:** update dependency autoprefixer (10.5.4 → 10.5.5) ([#379](https://github.com/misospace/KubeTix/issues/379)) ([3b8a83c](https://github.com/misospace/KubeTix/commit/3b8a83c2c1f81b3beef5ec7f651bdadeba618c83))
+* **deps:** update dependency autoprefixer (10.5.5 → 10.5.6) ([#387](https://github.com/misospace/KubeTix/issues/387)) ([db977f8](https://github.com/misospace/KubeTix/commit/db977f8f607af2c024f94627754e12e95a2541ab))
+* **deps:** update dependency next (16.3.1 → 16.3.2) ([#371](https://github.com/misospace/KubeTix/issues/371)) ([ec816bb](https://github.com/misospace/KubeTix/commit/ec816bbe71c581a870209eb778f8c3738379de20))
+* **deps:** update dependency next (16.3.2 → 16.3.4) ([#380](https://github.com/misospace/KubeTix/issues/380)) ([ea99fbd](https://github.com/misospace/KubeTix/commit/ea99fbd2bcafb979decf3ea17236e84b2f157312))
+* **deps:** update dependency postcss (8.5.26 → 8.5.28) ([#381](https://github.com/misospace/KubeTix/issues/381)) ([429193c](https://github.com/misospace/KubeTix/commit/429193c9c504aac12bb32a671af567de302c13d5))
+* **deps:** update python dependencies ([#385](https://github.com/misospace/KubeTix/issues/385)) ([615b952](https://github.com/misospace/KubeTix/commit/615b9529d9f5da4c60b7a50f5acfd243b9d26901))
+* **deps:** update testing-library monorepo ([#382](https://github.com/misospace/KubeTix/issues/382)) ([f5ceacc](https://github.com/misospace/KubeTix/commit/f5ceaccf46a8990708cc5e6bcd17baad63b8e99a))
+* **helm:** avoid duplicate kubeconfig encryption env ([#370](https://github.com/misospace/KubeTix/issues/370)) ([1f065be](https://github.com/misospace/KubeTix/commit/1f065bec43401343c451b4b3a773b908c037b537))
+* **migrations:** capture full schema in initial Alembic revision ([#367](https://github.com/misospace/KubeTix/issues/367)) ([49fdbe8](https://github.com/misospace/KubeTix/commit/49fdbe878f36ffb526c7bb4e429b1dbc8c3e1d98)), closes [#352](https://github.com/misospace/KubeTix/issues/352)
+* **oidc:** verify ID-token signature against provider JWKS before trusting claims ([#368](https://github.com/misospace/KubeTix/issues/368)) ([e19a935](https://github.com/misospace/KubeTix/commit/e19a935dcefd20b2b54212111982e396329dc275)), closes [#351](https://github.com/misospace/KubeTix/issues/351)
+
+
+### Chores
+
+* **api:** remove tracked 0-byte test_default.sqlite and ignore *.sqlite ([#375](https://github.com/misospace/KubeTix/issues/375)) ([0ac14c7](https://github.com/misospace/KubeTix/commit/0ac14c7cdfd2ea906c23ed4abc5a14020f7e2274)), closes [#355](https://github.com/misospace/KubeTix/issues/355)
+* **cli:** slim root CLI image to install only cryptography ([#376](https://github.com/misospace/KubeTix/issues/376)) ([9f4cf09](https://github.com/misospace/KubeTix/commit/9f4cf09b811515c278ce0a5998ec608ee82c5c84)), closes [#358](https://github.com/misospace/KubeTix/issues/358)
+
 ## [0.2.0](https://github.com/misospace/KubeTix/compare/v0.1.0...v0.2.0) (2026-08-18)
 
 
